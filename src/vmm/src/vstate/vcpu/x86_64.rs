@@ -19,9 +19,10 @@ use serde::{Deserialize, Serialize};
 use crate::arch::x86_64::interrupts;
 use crate::arch::x86_64::msr::{create_boot_msr_entries, MsrError};
 use crate::arch::x86_64::regs::{SetupFpuError, SetupRegistersError, SetupSpecialRegistersError};
+use crate::arch::EntryPoint;
 use crate::cpu_config::x86_64::{cpuid, CpuConfiguration};
 use crate::logger::{IncMetric, METRICS};
-use crate::vstate::memory::{Address, GuestAddress, GuestMemoryMmap};
+use crate::vstate::memory::GuestMemoryMmap;
 use crate::vstate::vcpu::{VcpuConfig, VcpuEmulation};
 use crate::vstate::vm::Vm;
 
@@ -169,13 +170,14 @@ impl KvmVcpu {
     /// # Arguments
     ///
     /// * `guest_mem` - The guest memory used by this microvm.
-    /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
+    /// * `kernel_entry_point` - Specifies the boot protocol and offset from `guest_mem` at which
+    ///   the kernel starts.
     /// * `vcpu_config` - The vCPU configuration.
     /// * `cpuid` - The capabilities exposed by this vCPU.
     pub fn configure(
         &mut self,
         guest_mem: &GuestMemoryMmap,
-        kernel_start_addr: GuestAddress,
+        kernel_entry_point: EntryPoint,
         vcpu_config: &VcpuConfig,
     ) -> Result<(), KvmVcpuConfigureError> {
         let mut cpuid = vcpu_config.cpu_config.cpuid.clone();
@@ -235,11 +237,10 @@ impl KvmVcpu {
             .collect::<Vec<_>>();
 
         crate::arch::x86_64::msr::set_msrs(&self.fd, &kvm_msrs)?;
-        crate::arch::x86_64::regs::setup_regs(&self.fd, kernel_start_addr.raw_value())?;
+        crate::arch::x86_64::regs::setup_regs(&self.fd, kernel_entry_point)?;
         crate::arch::x86_64::regs::setup_fpu(&self.fd)?;
-        crate::arch::x86_64::regs::setup_sregs(guest_mem, &self.fd)?;
+        crate::arch::x86_64::regs::setup_sregs(guest_mem, &self.fd, kernel_entry_point.protocol)?;
         crate::arch::x86_64::interrupts::set_lint(&self.fd)?;
-
         Ok(())
     }
 
@@ -595,9 +596,11 @@ mod tests {
     use std::os::unix::io::AsRawFd;
 
     use kvm_ioctls::Cap;
+    use utils::vm_memory::GuestAddress;
 
     use super::*;
     use crate::arch::x86_64::cpu_model::CpuModel;
+    use crate::arch::BootProtocol;
     use crate::cpu_config::templates::{
         CpuConfiguration, CpuTemplateType, CustomCpuTemplate, GetCpuTemplate, GuestConfigError,
         StaticCpuTemplate,
@@ -667,7 +670,14 @@ mod tests {
 
         let vcpu_config = create_vcpu_config(&vm, &vcpu, &CustomCpuTemplate::default()).unwrap();
         assert_eq!(
-            vcpu.configure(&vm_mem, GuestAddress(0), &vcpu_config,),
+            vcpu.configure(
+                &vm_mem,
+                EntryPoint {
+                    entry_addr: GuestAddress(0),
+                    protocol: BootProtocol::LinuxBoot,
+                },
+                &vcpu_config,
+            ),
             Ok(())
         );
 
@@ -679,7 +689,10 @@ mod tests {
                     Ok(config) => vcpu
                         .configure(
                             &vm_mem,
-                            GuestAddress(crate::arch::get_kernel_start()),
+                            EntryPoint {
+                                entry_addr: GuestAddress(crate::arch::get_kernel_start()),
+                                protocol: BootProtocol::LinuxBoot,
+                            },
                             &config,
                         )
                         .is_ok(),
@@ -782,8 +795,15 @@ mod tests {
                 msrs: HashMap::new(),
             },
         };
-        vcpu.configure(&vm_mem, GuestAddress(0), &vcpu_config)
-            .unwrap();
+        vcpu.configure(
+            &vm_mem,
+            EntryPoint {
+                entry_addr: GuestAddress(0),
+                protocol: BootProtocol::LinuxBoot,
+            },
+            &vcpu_config,
+        )
+        .unwrap();
 
         // Invalid entries filled with 0 should not exist.
         let cpuid = vcpu.get_cpuid().unwrap();
@@ -844,8 +864,16 @@ mod tests {
                 msrs: HashMap::new(),
             },
         };
-        vcpu.configure(&vm_mem, GuestAddress(0), &vcpu_config)
-            .unwrap();
+
+        vcpu.configure(
+            &vm_mem,
+            EntryPoint {
+                entry_addr: GuestAddress(0),
+                protocol: BootProtocol::LinuxBoot,
+            },
+            &vcpu_config,
+        )
+        .unwrap();
         vcpu.dump_cpu_config().unwrap();
     }
 

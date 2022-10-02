@@ -701,6 +701,7 @@ pub mod tests {
     use utils::signal::validate_signal_num;
 
     use super::*;
+    use crate::arch::{BootProtocol, EntryPoint};
     use crate::builder::StartMicrovmError;
     use crate::devices::bus::DummyDevice;
     use crate::devices::BusDevice;
@@ -905,7 +906,10 @@ pub mod tests {
         let vcpu_exit_evt = vcpu.exit_evt.try_clone().unwrap();
 
         // Needs a kernel since we'll actually run this vcpu.
-        let entry_addr = load_good_kernel(&vm_mem);
+        let entry_point = EntryPoint {
+            entry_addr: load_good_kernel(&vm_mem),
+            protocol: BootProtocol::LinuxBoot,
+        };
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -913,7 +917,7 @@ pub mod tests {
             vcpu.kvm_vcpu
                 .configure(
                     &vm_mem,
-                    entry_addr,
+                    entry_point,
                     &VcpuConfig {
                         vcpu_count: 1,
                         smt: false,
@@ -930,7 +934,7 @@ pub mod tests {
         vcpu.kvm_vcpu
             .configure(
                 &vm_mem,
-                entry_addr,
+                entry_point,
                 &VcpuConfig {
                     vcpu_count: 1,
                     smt: false,
