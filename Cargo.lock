@@ -428,12 +428,12 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
 name = "event-manager"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "377fa591135fbe23396a18e2655a6d5481bf7c5823cdfa3cc81b01a229cbe640"
+checksum = "2bbb5f730c95a458654dee0afb13f1ebb4fc3d7b772789d5f30713ec68fed75d"
 dependencies = [
  "libc",
- "vmm-sys-util",
+ "vmm-sys-util 0.11.0",
 ]
 
 [[package]]
@@ -562,7 +562,7 @@ source = "git+https://github.com/firecracker-microvm/kvm-bindings?tag=v0.5.0-1#4
 dependencies = [
  "versionize",
  "versionize_derive",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -573,7 +573,7 @@ checksum = "97422ba48d7ffb66fd4d18130f72ab66f9bbbf791fb7a87b9291cdcfec437593"
 dependencies = [
  "kvm-bindings",
  "libc",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -656,7 +656,7 @@ version = "0.1.0"
 source = "git+https://github.com/firecracker-microvm/micro-http?rev=0a58eb1#0a58eb1ece68e326e68365c4297d0a7c08ecd9bc"
 dependencies = [
  "libc",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -1180,7 +1180,7 @@ dependencies = [
  "net_gen",
  "serde",
  "serde_json",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -1203,7 +1203,7 @@ dependencies = [
  "serde_derive",
  "syn",
  "versionize_derive",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -1300,6 +1300,16 @@ name = "vmm-sys-util"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "733537bded03aaa93543f785ae997727b30d1d9f4a03b7861d23290474242e11"
+dependencies = [
+ "bitflags",
+ "libc",
+]
+
+[[package]]
+name = "vmm-sys-util"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc06a16ee8ebf0d9269aed304030b0d20a866b8b3dd3d4ce532596ac567a0d24"
 dependencies = [
  "bitflags",
  "libc",
