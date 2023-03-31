@@ -124,8 +124,8 @@ class MicrovmBuilder:
 
         # Download ssh key into the microvm root.
         ssh_key.download(vm.path)
-        vm.ssh_config["ssh_key_path"] = ssh_key.local_path()
-        os.chmod(vm.ssh_config["ssh_key_path"], 0o400)
+        vm.ssh_key = ssh_key.local_path()
+        os.chmod(vm.ssh_key, 0o400)
 
         # Provide a default network configuration.
         if net_ifaces is None or len(net_ifaces) == 0:
@@ -244,7 +244,7 @@ class MicrovmBuilder:
                 else vm.create_jailed_resource(disk)
             )
 
-        vm.ssh_config["ssh_key_path"] = snapshot.ssh_key.local_path()
+        vm.ssh_key = snapshot.ssh_key.local_path()
 
         # Create network interfaces.
         for iface in snapshot.net_ifaces:
