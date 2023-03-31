@@ -120,7 +120,7 @@ def validate_mmds(ssh_connection, data_store):
     # Configure interface to route MMDS requests
     cmd = "ip route add {} dev {}".format(IPV4_ADDRESS, net_iface_for_mmds.dev_name)
     _, stdout, stderr = ssh_connection.execute_command(cmd)
-    assert stdout.read() == stderr.read() == ""
+    assert stdout == stderr == ""
 
     # Fetch metadata to ensure MMDS is accessible.
     token = generate_mmds_session_token(ssh_connection, IPV4_ADDRESS, token_ttl=60)
@@ -225,8 +225,8 @@ def create_snapshots(vm, rootfs, kernel, cpu_template):
     # Get ssh key from read-only artifact.
     ssh_key = rootfs.ssh_key()
     ssh_key.download(vm.path)
-    vm.ssh_config["ssh_key_path"] = ssh_key.local_path()
-    os.chmod(vm.ssh_config["ssh_key_path"], 0o400)
+    vm.ssh_key = ssh_key.local_path()
+    os.chmod(vm.ssh_key, 0o400)
 
     fn = partial(add_cpu_template, cpu_template)
     _configure_vm_from_json(vm, VM_CONFIG_FILE, json_xform=fn)
@@ -252,9 +252,8 @@ def create_snapshots(vm, rootfs, kernel, cpu_template):
     populate_mmds(vm, data_store)
 
     # Iterate and validate connectivity on all ifaces after boot.
-    for iface in net_ifaces:
-        vm.ssh_config["hostname"] = iface.guest_ip
-        exit_code, _, _ = vm.ssh.execute_command("sync")
+    for i in range(4):
+        exit_code, _, _ = vm.ssh_iface(i).run("sync")
         assert exit_code == 0
 
     # Validate MMDS.

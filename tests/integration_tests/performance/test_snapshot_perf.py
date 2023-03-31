@@ -396,8 +396,7 @@ def test_snapshot_resume_latency(
         track_dirty_pages=diff_snapshots,
         rootfs_io_engine=io_engine,
     )
-    iface = NetIfaceConfig()
-    vm.add_net_iface(iface)
+    vm.add_net_iface()
     vm.start()
     # Check if guest works.
     exit_code, _, _ = vm.ssh.execute_command("ls")

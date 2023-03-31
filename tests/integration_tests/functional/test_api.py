@@ -48,7 +48,7 @@ def test_drive_io_engine(test_microvm_with_api, network_config):
     test_microvm.spawn()
 
     test_microvm.basic_config(add_root_device=False)
-    test_microvm.ssh_network_config(network_config, "1")
+    test_microvm.add_net_iface()
 
     supports_io_uring = is_io_uring_supported()
 
@@ -82,9 +82,9 @@ def test_drive_io_engine(test_microvm_with_api, network_config):
     test_microvm.start()
 
     # Execute a simple command to check that the guest booted successfully.
-    rc, _, stderr = test_microvm.ssh.execute_command("sync")
+    rc, _, stderr = test_microvm.ssh.execute_command("true")
     assert rc == 0
-    assert stderr.read() == ""
+    assert stderr == ""
 
     assert test_microvm.full_cfg.get().json()["drives"][0]["io_engine"] == "Sync"
 

@@ -27,7 +27,7 @@ def test_no_boottime(test_microvm_with_api):
     Check that boot timer device is not present by default.
     """
     vm = test_microvm_with_api
-    _ = _configure_and_run_vm(vm)
+    _configure_and_run_vm(vm)
     # microvm.start() ensures that the vm is in Running mode,
     # so there is no need to sleep and wait for log message.
     timestamps = re.findall(TIMESTAMP_LOG_REGEX, test_microvm_with_api.log_data)
@@ -45,7 +45,7 @@ def test_boottime_no_network(test_microvm_with_api, record_property, metrics):
     """
     vm = test_microvm_with_api
     vm.jailer.extra_args.update({"boot-timer": None})
-    _ = _configure_and_run_vm(vm)
+    _configure_and_run_vm(vm)
     boottime_us = _test_microvm_boottime(vm)
     print(f"Boot time with no network is: {boottime_us} us")
     record_property("boottime_no_network", f"{boottime_us} us < {MAX_BOOT_TIME_US} us")
@@ -58,15 +58,13 @@ def test_boottime_no_network(test_microvm_with_api, record_property, metrics):
     global_props.host_linux_version == "6.1",
     reason="perf regression under investigation",
 )
-def test_boottime_with_network(
-    test_microvm_with_api, network_config, record_property, metrics
-):
+def test_boottime_with_network(test_microvm_with_api, record_property, metrics):
     """
     Check boot time of microVM with a network device.
     """
     vm = test_microvm_with_api
     vm.jailer.extra_args.update({"boot-timer": None})
-    _tap = _configure_and_run_vm(vm, {"config": network_config, "iface_id": "1"})
+    _configure_and_run_vm(vm, network=True)
     boottime_us = _test_microvm_boottime(vm)
     print(f"Boot time with network configured is: {boottime_us} us")
     record_property(
@@ -82,7 +80,7 @@ def test_initrd_boottime(test_microvm_with_initrd, record_property, metrics):
     """
     vm = test_microvm_with_initrd
     vm.jailer.extra_args.update({"boot-timer": None})
-    _tap = _configure_and_run_vm(vm, initrd=True)
+    _configure_and_run_vm(vm, initrd=True)
     boottime_us = _test_microvm_boottime(vm, max_time_us=None)
     print(f"Boot time with initrd is: {boottime_us} us")
     record_property("boottime_initrd", f"{boottime_us} us")
@@ -111,7 +109,7 @@ def _test_microvm_boottime(vm, max_time_us=MAX_BOOT_TIME_US):
     return boot_time_us
 
 
-def _configure_and_run_vm(microvm, network_info=None, initrd=False):
+def _configure_and_run_vm(microvm, network=False, initrd=False):
     """Auxiliary function for preparing microvm before measuring boottime."""
     microvm.spawn()
 
@@ -123,11 +121,6 @@ def _configure_and_run_vm(microvm, network_info=None, initrd=False):
         config["use_initrd"] = True
 
     microvm.basic_config(**config)
-
-    if network_info:
-        _tap, _, _ = microvm.ssh_network_config(
-            network_info["config"], network_info["iface_id"]
-        )
-
+    if network:
+        microvm.add_net_iface()
     microvm.start()
-    return _tap if network_info else None
