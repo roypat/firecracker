@@ -648,7 +648,7 @@ cmd_test() {
     # namespaces, etc).
     # We need to run a privileged container to get that kind of access.
     env |grep -P "^(AWS_EMF_|BUILDKITE_)" > env.list
-
+    
     run_devctr \
         --privileged \
         --security-opt seccomp=unconfined \
@@ -662,7 +662,7 @@ cmd_test() {
         -v /boot:/boot \
         ${ramdisk_args} \
         -- \
-        pytest -W error::pytest.PytestUnraisableExceptionWarning -W error::pytest.PytestUnhandledThreadExceptionWarning "$@"
+        bash -c "pip install pytest-loop && pytest -W error::pytest.PytestUnraisableExceptionWarning -W error::pytest.PytestUnhandledThreadExceptionWarning $@ --loop 1000"
 
     ret=$?
 
