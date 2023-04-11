@@ -6,3 +6,5 @@ updates:
       interval: "daily"
     labels: 
       - "Status: Awaiting Review"
+    allow:
+      - dependency-type: "all"
