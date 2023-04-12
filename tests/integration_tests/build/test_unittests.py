@@ -19,6 +19,6 @@ def test_unittests(test_fc_session_root_path):
 
     @type: build
     """
-    extra_args = "--release --target {} ".format(TARGET)
+    extra_args = "--release --target {}".format(TARGET)
 
     host.cargo_test(test_fc_session_root_path, extra_args=extra_args)

@@ -43,11 +43,15 @@ def cargo_test(path, extra_args=""):
     path = os.path.join(path, CARGO_UNITTEST_REL_PATH)
     cmd = (
         "CARGO_TARGET_DIR={} RUST_TEST_THREADS=1 RUST_BACKTRACE=1 "
-        'RUSTFLAGS="{}" cargo test {} --all --no-fail-fast'.format(
+        'RUSTFLAGS="{}" cargo test {} --all --no-fail-fast -- --nocapture'.format(
             path, get_rustflags(), extra_args
         )
     )
-    utils.run_cmd(cmd)
+    _, stdout, stderr = utils.run_cmd(cmd)
+
+    print(
+        stdout[:4000]
+    )  # for some reason python crashes if I print too much. api_server tests are the first though so I don't care
 
 
 @with_filelock

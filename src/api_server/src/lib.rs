@@ -342,8 +342,9 @@ mod tests {
         let response =
             api_server.serve_vmm_action_request(Box::new(VmmAction::Pause), start_time_us);
         assert_eq!(response.status(), StatusCode::NoContent);
-        assert_ne!(METRICS.latencies_us.pause_vm.fetch(), 0);
-
+        let latency = METRICS.latencies_us.pause_vm.fetch();
+        assert_ne!(latency, 0);
+        println!("pause_vm latency was {}", latency);
         assert_eq!(METRICS.latencies_us.diff_create_snapshot.fetch(), 0);
         to_api
             .send(Box::new(Err(VmmActionError::OperationNotSupportedPreBoot)))

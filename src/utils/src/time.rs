@@ -160,7 +160,7 @@ pub fn get_time_ns(clock_type: ClockType) -> u64 {
 ///
 /// * `clock_type` - Identifier of the Linux Kernel clock on which to act.
 pub fn get_time_us(clock_type: ClockType) -> u64 {
-    get_time_ns(clock_type) / 1000
+    get_time_ns(clock_type)
 }
 
 /// Returns a timestamp in milliseconds based on the provided clock type.

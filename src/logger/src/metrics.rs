@@ -259,11 +259,11 @@ impl IncMetric for SharedIncMetric {
 
 impl StoreMetric for SharedStoreMetric {
     fn fetch(&self) -> usize {
-        self.0.load(Ordering::Relaxed)
+        self.0.load(Ordering::SeqCst)
     }
 
     fn store(&self, value: usize) {
-        self.0.store(value, Ordering::Relaxed);
+        self.0.store(value, Ordering::SeqCst);
     }
 }
 
