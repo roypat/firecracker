@@ -19,6 +19,9 @@ def test_unittests(test_fc_session_root_path):
 
     @type: build
     """
-    extra_args = "--release --target {} ".format(TARGET)
+    extra_args = "-p api_server tests::test_serve_vmm_action_request --release --target {} ".format(
+        TARGET
+    )
 
-    host.cargo_test(test_fc_session_root_path, extra_args=extra_args)
+    for _ in range(1000):
+        host.cargo_test(test_fc_session_root_path, extra_args=extra_args)

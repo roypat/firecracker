@@ -662,7 +662,8 @@ cmd_test() {
         -v /boot:/boot \
         ${ramdisk_args} \
         -- \
-        bash -c "pip install pytest-loop && pytest -W error::pytest.PytestUnraisableExceptionWarning -W error::pytest.PytestUnhandledThreadExceptionWarning $@ --loop 1000"
+	bash -c "for i in \$(seq 1 1000); do  RUST_TEST_THREADS=1 RUST_BACKTRACE=1  cargo test -p api_server || exit 1; done"
+     #   bash -c "pip install pytest-loop && pytest -W error::pytest.PytestUnraisableExceptionWarning -W error::pytest.PytestUnhandledThreadExceptionWarning $@ --loop 1000"
 
     ret=$?
 
