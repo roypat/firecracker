@@ -37,13 +37,11 @@ def get_stable_rss_mem_by_pid(pid, percentage_delta=0.5):
     return second_rss
 
 
-def make_guest_dirty_memory(ssh_connection, should_oom=False, amount=8192):
+def make_guest_dirty_memory(ssh_connection, should_oom=False, amount_mib=256):
     """Tell the guest, over ssh, to dirty `amount` pages of memory."""
     logger = logging.getLogger("make_guest_dirty_memory")
 
-    amount_in_mbytes = amount / MB_TO_PAGES
-
-    cmd = f"/sbin/fillmem {amount_in_mbytes}"
+    cmd = f"/usr/local/bin/fillmem {amount_mib}"
     exit_code, stdout, stderr = ssh_connection.execute_command(cmd)
     # add something to the logs for troubleshooting
     if exit_code != 0:
@@ -52,18 +50,23 @@ def make_guest_dirty_memory(ssh_connection, should_oom=False, amount=8192):
         logger.error("stderr: %s", stderr)
 
     cmd = "cat /tmp/fillmem_output.txt"
-    _, stdout, _ = ssh_connection.execute_command(cmd)
+    tries = 3
+    while tries > 0:
+        # it may take a bit of time to dirty the memory and the OOM to kick-in
+        time.sleep(0.5)
+        _, stdout, _ = ssh_connection.execute_command(cmd)
+        if stdout != "":
+            break
+        tries -= 1
+
     if should_oom:
-        assert (
-            "OOM Killer stopped the program with "
-            "signal 9, exit code 0" in stdout
-        )
+        assert "OOM Killer stopped the program with signal 9, exit code 0" in stdout
     else:
         assert exit_code == 0, stderr
         assert "Memory filling was successful" in stdout, stdout
 
 
-def _test_rss_memory_lower(test_microvm):
+def _test_rss_memory_lower(test_microvm, stable_delta=0.5):
     """Check inflating the balloon makes guest use less rss memory."""
     # Get the firecracker pid, and open an ssh connection.
     firecracker_pid = test_microvm.jailer_clone_pid
@@ -74,20 +77,22 @@ def _test_rss_memory_lower(test_microvm):
     assert test_microvm.api_session.is_status_no_content(response.status_code)
 
     # Get initial rss consumption.
-    init_rss = get_stable_rss_mem_by_pid(firecracker_pid)
+    init_rss = get_stable_rss_mem_by_pid(firecracker_pid, percentage_delta=stable_delta)
 
     # Get the balloon back to 0.
     response = test_microvm.balloon.patch(amount_mib=0)
     assert test_microvm.api_session.is_status_no_content(response.status_code)
     # This call will internally wait for rss to become stable.
-    _ = get_stable_rss_mem_by_pid(firecracker_pid)
+    _ = get_stable_rss_mem_by_pid(firecracker_pid, percentage_delta=stable_delta)
 
     # Dirty memory, then inflate balloon and get ballooned rss consumption.
-    make_guest_dirty_memory(ssh_connection)
+    make_guest_dirty_memory(ssh_connection, amount_mib=32)
 
     response = test_microvm.balloon.patch(amount_mib=200)
     assert test_microvm.api_session.is_status_no_content(response.status_code)
-    balloon_rss = get_stable_rss_mem_by_pid(firecracker_pid)
+    balloon_rss = get_stable_rss_mem_by_pid(
+        firecracker_pid, percentage_delta=stable_delta
+    )
 
     # Check that the ballooning reclaimed the memory.
     assert balloon_rss - init_rss <= 15000
@@ -155,7 +160,17 @@ def test_inflate_reduces_free(test_microvm_with_api):
 @pytest.mark.parametrize("deflate_on_oom", [True, False])
 def test_deflate_on_oom(test_microvm_with_api, deflate_on_oom):
     """
-    Verify that setting the `deflate_on_oom` to True works correctly.
+    Verify that setting the `deflate_on_oom` option works correctly.
+
+    https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md
+
+    deflate_on_oom=True
+
+      should not result in an OOM kill
+
+    deflate_on_oom=False
+
+      should result in an OOM kill
     """
     test_microvm = test_microvm_with_api
     test_microvm.spawn()
@@ -185,14 +200,9 @@ def test_deflate_on_oom(test_microvm_with_api, deflate_on_oom):
     # This call will internally wait for rss to become stable.
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
 
-    # Check that using memory doesn't lead to an out of memory error.
-    # Note that due to `test_deflate_on_oom_false`, we know that
-    # if `deflate_on_oom` were set to False, then such an error
-    # would have happened.
+    # Check that using memory leads an out of memory error (or not).
     make_guest_dirty_memory(
-        test_microvm.ssh,
-        amount=inflate_size,
-        should_oom=not deflate_on_oom
+        test_microvm.ssh, amount_mib=inflate_size, should_oom=not deflate_on_oom
     )
 
 
@@ -219,6 +229,8 @@ def test_reinflate_balloon(test_microvm_with_api):
     # First inflate the balloon to free up the uncertain amount of memory
     # used by the kernel at boot and establish a baseline, then give back
     # the memory.
+    # wait until boot completes:
+    test_microvm.ssh.run("true")
     response = test_microvm.balloon.patch(amount_mib=200)
     assert test_microvm.api_session.is_status_no_content(response.status_code)
     # This call will internally wait for rss to become stable.
@@ -230,7 +242,7 @@ def test_reinflate_balloon(test_microvm_with_api):
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Get the guest to dirty memory.
-    make_guest_dirty_memory(test_microvm.ssh)
+    make_guest_dirty_memory(test_microvm.ssh, amount_mib=32)
     first_reading = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Now inflate the balloon.
@@ -245,7 +257,7 @@ def test_reinflate_balloon(test_microvm_with_api):
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Now have the guest dirty memory again.
-    make_guest_dirty_memory(test_microvm.ssh)
+    make_guest_dirty_memory(test_microvm.ssh, amount_mib=32)
     third_reading = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Now inflate the balloon again.
@@ -329,15 +341,15 @@ def test_stats(test_microvm_with_api):
     initial_stats = test_microvm.balloon.get_stats().json()
 
     # Dirty 10MB of pages.
-    make_guest_dirty_memory(test_microvm.ssh, amount=10 * MB_TO_PAGES)
+    make_guest_dirty_memory(test_microvm.ssh, amount_mib=10)
     time.sleep(1)
     # This call will internally wait for rss to become stable.
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Make sure that the stats catch the page faults.
     after_workload_stats = test_microvm.balloon.get_stats().json()
-    assert initial_stats["minor_faults"] < after_workload_stats["minor_faults"]
-    assert initial_stats["major_faults"] < after_workload_stats["major_faults"]
+    assert initial_stats.get("minor_faults", 0) < after_workload_stats["minor_faults"]
+    assert initial_stats.get("major_faults", 0) < after_workload_stats["major_faults"]
 
     # Now inflate the balloon with 10MB of pages.
     response = test_microvm.balloon.patch(amount_mib=10)
@@ -389,7 +401,7 @@ def test_stats_update(test_microvm_with_api):
     firecracker_pid = test_microvm.jailer_clone_pid
 
     # Dirty 30MB of pages.
-    make_guest_dirty_memory(test_microvm.ssh, amount=30 * MB_TO_PAGES)
+    make_guest_dirty_memory(test_microvm.ssh, amount_mib=30)
 
     # This call will internally wait for rss to become stable.
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
@@ -442,7 +454,7 @@ def test_balloon_snapshot(microvm_factory, guest_kernel, rootfs):
     vm.start()
 
     # Dirty 60MB of pages.
-    make_guest_dirty_memory(vm.ssh, amount=60 * MB_TO_PAGES)
+    make_guest_dirty_memory(vm.ssh, amount_mib=60)
     time.sleep(1)
 
     # Get the firecracker pid, and open an ssh connection.
@@ -482,7 +494,7 @@ def test_balloon_snapshot(microvm_factory, guest_kernel, rootfs):
     third_reading = get_stable_rss_mem_by_pid(firecracker_pid)
 
     # Dirty 60MB of pages.
-    make_guest_dirty_memory(microvm.ssh, amount=60 * MB_TO_PAGES)
+    make_guest_dirty_memory(microvm.ssh, amount_mib=60)
 
     # Check memory usage.
     fourth_reading = get_stable_rss_mem_by_pid(firecracker_pid)
@@ -526,9 +538,6 @@ def test_snapshot_compatibility(microvm_factory, guest_kernel, rootfs):
     assert vm.api_session.is_status_no_content(response.status_code)
 
     vm.start()
-
-    logger.info("Create %s #0.", snapshot_type)
-
     vm.snapshot_full()
 
 
@@ -550,7 +559,7 @@ def test_memory_scrub(microvm_factory, guest_kernel, rootfs):
     microvm.start()
 
     # Dirty 60MB of pages.
-    make_guest_dirty_memory(microvm.ssh, amount=60 * MB_TO_PAGES)
+    make_guest_dirty_memory(microvm.ssh, amount_mib=60)
 
     # Now inflate the balloon with 60MB of pages.
     response = microvm.balloon.patch(amount_mib=60)
@@ -569,5 +578,7 @@ def test_memory_scrub(microvm_factory, guest_kernel, rootfs):
     # Wait for the deflate to complete.
     _ = get_stable_rss_mem_by_pid(firecracker_pid)
 
-    exit_code, _, _ = microvm.ssh.execute_command("/sbin/readmem {} {}".format(60, 1))
+    exit_code, _, _ = microvm.ssh.execute_command(
+        "/usr/local/bin/readmem {} {}".format(60, 1)
+    )
     assert exit_code == 0

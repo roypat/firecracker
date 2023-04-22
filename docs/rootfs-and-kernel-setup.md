@@ -167,13 +167,11 @@ Alpine Linux:
 ### Use the provided recipe
 
 The disk images used in our CI to test Firecracker's features are obtained by
-using the recipe:
+using the recipe (in a Ubuntu 22.04 host):
 
 ```bash
 ./resources/rebuild.sh
 ```
-
-The resulting images TBD
 
 The images resulting using this method are minimized Ubuntu 22.04. Feel free to
 adjust the script(s) to suit your use case.

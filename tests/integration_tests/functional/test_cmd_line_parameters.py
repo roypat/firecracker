@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests that ensure the correctness of the command line parameters."""
 
-import logging
 import platform
 from pathlib import Path
 
@@ -11,23 +10,24 @@ from framework.utils import run_cmd
 from host_tools.cargo_build import get_firecracker_binaries
 
 
-def test_describe_snapshot_all_versions(microvm_factory, guest_kernel, rootfs, firecracker_release):
+def test_describe_snapshot_all_versions(
+    microvm_factory, guest_kernel, rootfs, firecracker_release
+):
     """
     Test `--describe-snapshot` correctness for all snapshot versions.
 
     For each release create a snapshot and verify the data version of the
     snapshot state file.
     """
-    jailer = firecracker_release.jailer()
     target_version = firecracker_release.snapshot_version
     vm = microvm_factory.build(
         guest_kernel,
         rootfs,
-        fc_binary=firecracker_release.local_path(),
-        jailer_binary=jailer.local_path(),
-        diff_snapshots=True,
+        fc_binary_path=firecracker_release.path,
+        jailer_binary_path=firecracker_release.jailer,
     )
     vm.spawn()
+    vm.basic_config(track_dirty_pages=True)
     vm.start()
     snapshot = vm.snapshot_diff()
     print("========== Firecracker create snapshot log ==========")
@@ -44,17 +44,16 @@ def test_describe_snapshot_all_versions(microvm_factory, guest_kernel, rootfs, f
     assert target_version in stdout
 
 
-def test_cli_metrics_path(test_microvm_with_api):
+def test_cli_metrics_path(uvm_plain):
     """
     Test --metrics-path parameter
     """
-    microvm = test_microvm_with_api
+    microvm = uvm_plain
     metrics_fifo_path = Path(microvm.path) / "metrics_ndjson.fifo"
     metrics_fifo = log_tools.Fifo(metrics_fifo_path)
     microvm.spawn(metrics_path=metrics_fifo_path)
     microvm.basic_config()
     microvm.start()
-
     metrics = microvm.flush_metrics(metrics_fifo)
 
     exp_keys = [
@@ -113,12 +112,12 @@ def test_cli_metrics_path_if_metrics_initialized_twice_fail(test_microvm_with_ap
     }
 
 
-def test_cli_metrics_if_resume_no_metrics(test_microvm_with_api, microvm_factory):
+def test_cli_metrics_if_resume_no_metrics(uvm_plain, microvm_factory):
     """
     Check that metrics configuration is not part of the snapshot
     """
     # Given: a snapshot of a FC with metrics configured with the CLI option
-    uvm1 = test_microvm_with_api
+    uvm1 = uvm_plain
     metrics_path = Path(uvm1.path) / "metrics.ndjson"
     metrics_path.touch()
     uvm1.spawn(metrics_path=metrics_path)

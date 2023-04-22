@@ -90,8 +90,8 @@ def st_core(metrics, results_file_dumper, guest_kernel, rootfs, request):
         "instance": global_props.instance,
         "cpu_model": global_props.cpu_model,
         "host_kernel": "linux-" + global_props.host_linux_version,
-        "guest_kernel": guest_kernel.prop,
-        "rootfs": rootfs.name(),
+        "guest_kernel": guest_kernel.name,
+        "rootfs": rootfs.name,
     }
     stats.metrics = metrics
     stats.metrics_test = request.function.__name__

@@ -133,7 +133,7 @@ def run_fio(env_id, basevm, mode, bs):
         )
 
         # Print the fio command in the log and run it
-        rc, _, stderr = basevm.ssh.execute_command(cmd)
+        rc, _, stderr = basevm.ssh.execute_command(f"cd /tmp; {cmd}")
         assert rc == 0, stderr
         assert stderr == ""
 
@@ -142,8 +142,8 @@ def run_fio(env_id, basevm, mode, bs):
 
         os.makedirs(logs_path)
 
-        basevm.ssh.scp_get("*.log", logs_path)
-        rc, _, stderr = basevm.ssh.execute_command("rm *.log")
+        basevm.ssh.scp_get("/tmp/*.log", logs_path)
+        rc, _, stderr = basevm.ssh.execute_command("rm /tmp/*.log")
         assert rc == 0, stderr
 
         return cpu_load_future.result()
@@ -284,7 +284,7 @@ def test_block_performance(
         }
     )
 
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{io_engine.lower()}_{microvm_cfg}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{io_engine.lower()}_{microvm_cfg}"
 
     fio_id = f"{fio_mode}-bs{fio_block_size}"
     st_prod = st.producer.LambdaProducer(
