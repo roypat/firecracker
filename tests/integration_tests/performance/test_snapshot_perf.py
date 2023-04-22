@@ -3,18 +3,16 @@
 """Basic tests scenarios for snapshot save/restore."""
 
 import json
-import logging
 import os
 import platform
 
 import pytest
 
 import host_tools.logging as log_tools
-from framework.artifacts import NetIfaceConfig
-from framework.builder import MicrovmBuilder, SnapshotBuilder, SnapshotType
+from framework.microvm import SnapshotType
+from framework.properties import global_props
 from framework.stats import consumer, criteria, function, producer, types
 from framework.utils import CpuMap, eager_map, get_kernel_version
-from framework.utils_cpuid import get_instance_type
 
 # How many latencies do we sample per test.
 SAMPLE_COUNT = 3
@@ -123,7 +121,7 @@ def snapshot_resume_measurements(vm_type, io_engine):
     """Define measurements for snapshot resume tests."""
     load_latency = {
         "target": LOAD_LATENCY_BASELINES[
-            get_instance_type(), get_kernel_version(level=1), io_engine, vm_type
+            global_props.instance, get_kernel_version(level=1), io_engine, vm_type
         ]
     }
 
@@ -137,18 +135,9 @@ def snapshot_resume_measurements(vm_type, io_engine):
     return [latency]
 
 
-def snapshot_create_producer(
-    logger, vm, disks, ssh_key, target_version, metrics_fifo, snapshot_type
-):
+def snapshot_create_producer(vm, target_version, metrics_fifo, snapshot_type):
     """Produce results for snapshot create tests."""
-    snapshot_builder = SnapshotBuilder(vm)
-    snapshot_builder.create(
-        disks=disks,
-        ssh_key=ssh_key,
-        snapshot_type=snapshot_type,
-        target_version=target_version,
-        use_ramdisk=True,
-    )
+    vm.make_snapshot(snapshot_type, target_version=target_version)
     metrics = vm.flush_metrics(metrics_fifo)
 
     if snapshot_type == SnapshotType.FULL:
@@ -156,19 +145,17 @@ def snapshot_create_producer(
     else:
         value = metrics["latencies_us"]["diff_create_snapshot"] / USEC_IN_MSEC
 
-    logger.info("Latency {} ms".format(value))
+    print(f"Latency {value} ms")
 
     return value
 
 
-def snapshot_resume_producer(logger, vm_builder, snapshot, snapshot_type, use_ramdisk):
+def snapshot_resume_producer(microvm_factory, snapshot, metrics_fifo):
     """Produce results for snapshot resume tests."""
-    microvm, metrics_fifo = vm_builder.build_from_snapshot(
-        snapshot,
-        resume=True,
-        diff_snapshots=snapshot_type == SnapshotType.DIFF,
-        use_ramdisk=use_ramdisk,
-    )
+
+    microvm = microvm_factory.build()
+    microvm.spawn()
+    microvm.restore_from_snapshot(snapshot, resume=True)
 
     # Attempt to connect to resumed microvm.
     # Verify if guest can run commands.
@@ -185,7 +172,7 @@ def snapshot_resume_producer(logger, vm_builder, snapshot, snapshot_type, use_ra
             value = cur_value
             break
 
-    logger.info("Latency {} ms".format(value))
+    print("Latency {value} ms")
     return value
 
 
@@ -196,7 +183,6 @@ def test_older_snapshot_resume_latency(
     firecracker_release,
     io_engine,
     st_core,
-    bin_cloner_path,
 ):
     """
     Test scenario: Older snapshot load performance measurement.
@@ -204,35 +190,26 @@ def test_older_snapshot_resume_latency(
     With each previous firecracker version, create a snapshot and try to
     restore in current version.
     """
-    logger = logging.getLogger("old_snapshot_load")
     snapshot_type = SnapshotType.FULL
-    jailer = firecracker_release.jailer()
-    fc_version = firecracker_release.base_name()[1:]
-    logger.info("Firecracker version: %s", fc_version)
-    logger.info("Source Firecracker: %s", firecracker_release.local_path())
-    logger.info("Source Jailer: %s", jailer.local_path())
-
     vcpus, guest_mem_mib = 2, 512
     microvm_cfg = f"{vcpus}vcpu_{guest_mem_mib}mb.json"
-    vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
-    vm.spawn()
+    vm = microvm_factory.build(
+        guest_kernel,
+        rootfs,
+        monitor_memory=False,
+        fc_binary_path=firecracker_release.path,
+        jailer_binary_path=firecracker_release.jailer,
+    )
+    metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
+    metrics_fifo = log_tools.Fifo(metrics_fifo_path)
+    vm.spawn(metrics_path=metrics_fifo_path)
     vm.basic_config(vcpu_count=vcpus, mem_size_mib=guest_mem_mib)
-    iface = NetIfaceConfig()
-    vm.add_net_iface(iface)
+    vm.add_net_iface()
     vm.start()
-
     # Check if guest works.
     exit_code, _, _ = vm.ssh.execute_command("ls")
     assert exit_code == 0
-
-    # The snapshot builder expects disks as paths, not artifacts.
-    disks = [vm.rootfs_file]
-    # Create a snapshot builder from a microvm.
-    snapshot_builder = SnapshotBuilder(vm)
-    snapshot = snapshot_builder.create(
-        disks, rootfs.ssh_key(), snapshot_type, net_ifaces=[iface]
-    )
-    vm.kill()
+    snapshot = vm.make_snapshot(snapshot_type)
 
     st_core.name = "older_snapshot_resume_latency"
     st_core.iterations = SAMPLE_COUNT
@@ -245,11 +222,9 @@ def test_older_snapshot_resume_latency(
     prod = producer.LambdaProducer(
         func=snapshot_resume_producer,
         func_kwargs={
-            "logger": logger,
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
+            "microvm_factory": microvm_factory,
             "snapshot": snapshot,
-            "snapshot_type": snapshot_type,
-            "use_ramdisk": False,
+            "metrics_fifo": metrics_fifo,
         },
     )
 
@@ -289,26 +264,18 @@ def test_snapshot_create_latency(
     - Microvm: 2vCPU with 256/512 MB RAM
     TODO: Multiple microvm sizes must be tested in the async pipeline.
     """
-    logger = logging.getLogger("snapshot_sequence")
-
     diff_snapshots = snapshot_type == SnapshotType.DIFF
     vcpus = 2
     microvm_cfg = f"{vcpus}vcpu_{guest_mem_mib}mb.json"
     vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
-    vm.spawn(use_ramdisk=True)
+    metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
+    metrics_fifo = log_tools.Fifo(metrics_fifo_path)
+    vm.spawn(metrics_path=metrics_fifo_path)
     vm.basic_config(
         vcpu_count=vcpus,
         mem_size_mib=guest_mem_mib,
-        use_initrd=True,
         track_dirty_pages=diff_snapshots,
     )
-
-    # Configure metrics system.
-    metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
-    metrics_fifo = log_tools.Fifo(metrics_fifo_path)
-    response = vm.metrics.put(metrics_path=vm.create_jailed_resource(metrics_fifo.path))
-    assert vm.api_session.is_status_no_content(response.status_code)
-
     vm.start()
 
     # Check if the needed CPU cores are available. We have the API
@@ -336,10 +303,7 @@ def test_snapshot_create_latency(
     prod = producer.LambdaProducer(
         func=snapshot_create_producer,
         func_kwargs={
-            "logger": logger,
             "vm": vm,
-            "disks": [vm.rootfs_file],
-            "ssh_key": rootfs.ssh_key(),
             "target_version": firecracker_release.snapshot_version,
             "metrics_fifo": metrics_fifo,
             "snapshot_type": snapshot_type,
@@ -372,7 +336,6 @@ def test_snapshot_resume_latency(
     snapshot_type,
     io_engine,
     st_core,
-    bin_cloner_path,
 ):
     """
     Test scenario: Snapshot load performance measurement.
@@ -383,16 +346,16 @@ def test_snapshot_resume_latency(
     - Microvm: 2vCPU with 256/512 MB RAM
     TODO: Multiple microvm sizes must be tested in the async pipeline.
     """
-    logger = logging.getLogger("snapshot_load")
     diff_snapshots = snapshot_type == SnapshotType.DIFF
     vcpus = 2
     microvm_cfg = f"{vcpus}vcpu_{guest_mem_mib}mb.json"
     vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
-    vm.spawn(use_ramdisk=True)
+    metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
+    metrics_fifo = log_tools.Fifo(metrics_fifo_path)
+    vm.spawn(metrics_path=metrics_fifo_path)
     vm.basic_config(
         vcpu_count=vcpus,
         mem_size_mib=guest_mem_mib,
-        use_initrd=True,
         track_dirty_pages=diff_snapshots,
         rootfs_io_engine=io_engine,
     )
@@ -402,13 +365,8 @@ def test_snapshot_resume_latency(
     exit_code, _, _ = vm.ssh.execute_command("ls")
     assert exit_code == 0
 
-    logger.info("Create %s", snapshot_type)
     # Create a snapshot builder from a microvm.
-    snapshot_builder = SnapshotBuilder(vm)
-    disks = [vm.rootfs_file]
-    snapshot = snapshot_builder.create(
-        disks, rootfs.ssh_key(), snapshot_type, use_ramdisk=True, net_ifaces=[iface]
-    )
+    snapshot = vm.make_snapshot(snapshot_type)
     vm.kill()
 
     st_core.name = "snapshot_resume_latency"
@@ -422,11 +380,9 @@ def test_snapshot_resume_latency(
     prod = producer.LambdaProducer(
         func=snapshot_resume_producer,
         func_kwargs={
-            "logger": logger,
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
+            "microvm_factory": microvm_factory,
             "snapshot": snapshot,
-            "snapshot_type": snapshot_type,
-            "use_ramdisk": True,
+            "metrics_fifo": metrics_fifo,
         },
     )
 

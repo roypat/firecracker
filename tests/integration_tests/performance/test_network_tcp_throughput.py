@@ -235,7 +235,6 @@ def pipe(basevm, mode, payload_length, current_avail_cpu, host_ip, env_id):
     """Create producer/consumer pipes."""
     iperf_guest_cmd_builder = (
         CmdBuilder(IPERF3)
-        .with_arg("--verbose")
         .with_arg("--client", host_ip)
         .with_arg("--time", RUNTIME_SEC)
         .with_arg("--json")
@@ -328,7 +327,7 @@ def test_network_tcp_throughput(
         payload_length,
         current_avail_cpu + 1,
         DEFAULT_HOST_IP,
-        f"{guest_kernel.name()}/{rootfs.name()}/{microvm_cfg}",
+        f"{guest_kernel.name}/{rootfs.name}/{microvm_cfg}",
     )
     st_core.add_pipe(prod, cons, tag)
 

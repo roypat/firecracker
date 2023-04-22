@@ -11,6 +11,7 @@ import pytest
 
 import framework.stats as st
 import host_tools.drive as drive_tools
+import host_tools.logging as log_tools
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
 from framework.utils import DictQuery, get_kernel_version
@@ -92,7 +93,7 @@ def get_snap_restore_latency(
     scratch_drives = get_scratch_drives()
 
     vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
-    vm.spawn(use_ramdisk=True, log_level="Info")
+    vm.spawn(log_level="Info")
     vm.basic_config(
         vcpu_count=vcpus,
         mem_size_mib=mem_size,
@@ -104,7 +105,7 @@ def get_snap_restore_latency(
 
     if blocks > 1:
         for name, diskfile in scratch_drives[: (blocks - 1)]:
-            vm.add_drive(name, diskfile.path, use_ramdisk=True, io_engine="Sync")
+            vm.add_drive(name, diskfile.path, io_engine="Sync")
 
     if all_devices:
         response = vm.balloon.put(
@@ -122,7 +123,9 @@ def get_snap_restore_latency(
     values = []
     for _ in range(iterations):
         microvm = microvm_factory.build()
-        microvm.spawn()
+        metrics_fifo_path = os.path.join(microvm.path, "metrics_fifo")
+        metrics_fifo = log_tools.Fifo(metrics_fifo_path)
+        microvm.spawn(metrics_path=metrics_fifo_path)
         microvm.restore_from_snapshot(snapshot, resume=True)
         # Check if guest still runs commands.
         exit_code, _, _ = microvm.ssh.execute_command("dmesg")
@@ -130,7 +133,7 @@ def get_snap_restore_latency(
 
         value = 0
         # Parse all metric data points in search of load_snapshot time.
-        metrics = microvm.get_all_metrics()
+        metrics = microvm.get_all_metrics(metrics_fifo)
         for data_point in metrics:
             metrics = json.loads(data_point)
             cur_value = metrics["latencies_us"]["load_snapshot"]
@@ -158,7 +161,7 @@ def test_snapshot_scaling_vcpus(
 ):
     """Restore snapshots with variable vcpu count."""
     guest_config = f"{vcpu_count}vcpu_{BASE_MEM_SIZE_MIB}mb"
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -186,7 +189,7 @@ def test_snapshot_scaling_mem(
     """Restore snapshots with variable memory size."""
     mem_mib = BASE_MEM_SIZE_MIB * (2**mem_exponent)
     guest_config = f"{BASE_VCPU_COUNT}vcpu_{mem_mib}mb"
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -211,7 +214,7 @@ def test_snapshot_scaling_net(
 ):
     """Restore snapshots with variable net device count."""
     guest_config = f"{BASE_NET_COUNT + net_count}net_dev"
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -237,7 +240,7 @@ def test_snapshot_scaling_block(
 ):
     """Restore snapshots with variable block device count."""
     guest_config = f"{BASE_BLOCK_COUNT + block_count}block_dev"
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -260,7 +263,7 @@ def test_snapshot_scaling_block(
 def test_snapshot_all_devices(microvm_factory, rootfs, guest_kernel, st_core):
     """Restore snapshots with one of each devices."""
     guest_config = "all_dev"
-    env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
+    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={

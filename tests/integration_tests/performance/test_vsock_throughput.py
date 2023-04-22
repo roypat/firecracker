@@ -31,7 +31,8 @@ CONFIG_DICT = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
 
 # Number of seconds to wait for the iperf3 server to start
 SERVER_STARTUP_TIME_SEC = 2
-IPERF3 = "iperf3-vsock"
+IPERF3 = "/usr/local/bin/iperf3-vsock"
+IPERF3_GUEST = "/tmp/iperf3-vsock"
 THROUGHPUT = "throughput"
 DURATION = "duration"
 BASE_PORT = 5201
@@ -133,6 +134,7 @@ def produce_iperf_output(
         )
 
         pinned_cmd = f"taskset --cpu-list {client_idx % basevm.vcpus_count}" f" {cmd}"
+        conn.scp_put(IPERF3, IPERF3_GUEST)
         rc, stdout, stderr = conn.execute_command(pinned_cmd)
 
         assert rc == 0, stderr
@@ -218,7 +220,7 @@ def consume_iperf_output(cons, result):
 def pipe(basevm, current_avail_cpu, env_id, mode, payload_length):
     """Producer/Consumer pipes generator."""
     iperf_guest_cmd_builder = (
-        CmdBuilder(IPERF3)
+        CmdBuilder(IPERF3_GUEST)
         .with_arg("--vsock")
         .with_arg("-c", 2)
         .with_arg("--json")
@@ -309,7 +311,7 @@ def test_vsock_throughput(
     cons, prod, tag = pipe(
         vm,
         current_avail_cpu + 1,
-        f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}",
+        f"{guest_kernel.name}/{rootfs.name}/{guest_config}",
         mode,
         payload_length,
     )
