@@ -289,7 +289,7 @@ def test_no_flush(test_microvm_with_api):
     test_microvm.add_drive(
         "rootfs",
         test_microvm.rootfs_file,
-        root_device=True,
+        is_root_device=True,
     )
 
     # Configure the metrics.
@@ -331,7 +331,7 @@ def test_flush(test_microvm_with_api):
     test_microvm.add_drive(
         "rootfs",
         test_microvm.rootfs_file,
-        root_device=True,
+        is_root_device=True,
         cache_type="Writeback",
     )
 
@@ -369,7 +369,7 @@ def test_block_default_cache_old_version(test_microvm_with_api):
     test_microvm.add_drive(
         "rootfs",
         test_microvm.rootfs_file,
-        root_device=True,
+        is_root_device=True,
         cache_type="Writeback",
     )
 
