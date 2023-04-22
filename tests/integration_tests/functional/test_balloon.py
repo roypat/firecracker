@@ -8,7 +8,6 @@ import time
 import pytest
 from retry import retry
 
-from framework.builder import MicrovmBuilder, SnapshotBuilder, SnapshotType
 from framework.utils import get_free_mem_ssh, run_cmd
 
 MB_TO_PAGES = 256
@@ -420,20 +419,15 @@ def test_stats_update(test_microvm_with_api):
     assert next_stats["available_memory"] != final_stats["available_memory"]
 
 
-def test_balloon_snapshot(bin_cloner_path, microvm_factory, guest_kernel, rootfs):
+def test_balloon_snapshot(microvm_factory, guest_kernel, rootfs):
     """
     Test that the balloon works after pause/resume.
     """
-    logger = logging.getLogger("snapshot_sequence")
-    snapshot_type = SnapshotType.FULL
-    diff_snapshots = snapshot_type == SnapshotType.DIFF
-
     vm = microvm_factory.build(guest_kernel, rootfs)
     vm.spawn()
     vm.basic_config(
         vcpu_count=2,
         mem_size_mib=256,
-        track_dirty_pages=diff_snapshots,
     )
     vm.add_net_iface()
 
@@ -468,21 +462,12 @@ def test_balloon_snapshot(bin_cloner_path, microvm_factory, guest_kernel, rootfs
     # We only test that the reduction happens.
     assert first_reading > second_reading
 
-    logger.info("Create %s #0.", snapshot_type)
-    # Create a snapshot builder from a microvm.
-    snapshot_builder = SnapshotBuilder(vm)
-    disks = [vm.rootfs_file]
-    # Create base snapshot.
-    snapshot = snapshot_builder.create(
-        disks, rootfs.ssh_key(), snapshot_type, net_ifaces=[iface]
-    )
-    vm.kill()
+    snapshot = vm.snapshot_full()
+    microvm = microvm_factory.build()
+    microvm.spawn()
+    microvm.restore_from_snapshot(snapshot)
+    microvm.resume()
 
-    logger.info("Load snapshot #%d, mem %s", 1, snapshot.mem)
-    vm_builder = MicrovmBuilder(bin_cloner_path)
-    microvm, _ = vm_builder.build_from_snapshot(
-        snapshot, resume=True, diff_snapshots=diff_snapshots
-    )
     # Attempt to connect to resumed microvm.
     microvm.ssh.run("true")
 
@@ -527,16 +512,11 @@ def test_snapshot_compatibility(microvm_factory, guest_kernel, rootfs):
     """
     Test that the balloon serializes correctly.
     """
-    logger = logging.getLogger("snapshot_compatibility")
-    snapshot_type = SnapshotType.FULL
-    diff_snapshots = snapshot_type == SnapshotType.DIFF
-
     vm = microvm_factory.build(guest_kernel, rootfs)
     vm.spawn()
     vm.basic_config(
         vcpu_count=2,
         mem_size_mib=256,
-        track_dirty_pages=diff_snapshots,
     )
 
     # Add a memory balloon with stats enabled.
@@ -549,15 +529,7 @@ def test_snapshot_compatibility(microvm_factory, guest_kernel, rootfs):
 
     logger.info("Create %s #0.", snapshot_type)
 
-    # Pause the microVM in order to allow snapshots
-    response = vm.vm.patch(state="Paused")
-    assert vm.api_session.is_status_no_content(response.status_code)
-
-    # Create a snapshot builder from a microvm.
-    snapshot_builder = SnapshotBuilder(vm)
-
-    # Check we can create a snapshot with a balloon on current version.
-    snapshot_builder.create([rootfs.local_path()], rootfs.ssh_key(), snapshot_type)
+    vm.snapshot_full()
 
 
 def test_memory_scrub(microvm_factory, guest_kernel, rootfs):
