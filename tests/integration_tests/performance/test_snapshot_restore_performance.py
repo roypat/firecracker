@@ -11,7 +11,6 @@ import pytest
 
 import framework.stats as st
 import host_tools.drive as drive_tools
-from framework.builder import MicrovmBuilder, SnapshotBuilder, SnapshotType
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
 from framework.utils import DictQuery, get_kernel_version
@@ -79,7 +78,6 @@ def default_lambda_consumer(env_id, workload):
 
 
 def get_snap_restore_latency(
-    vm_builder,
     microvm_factory,
     guest_kernel,
     rootfs,
@@ -99,18 +97,14 @@ def get_snap_restore_latency(
         vcpu_count=vcpus,
         mem_size_mib=mem_size,
         rootfs_io_engine="Sync",
-        use_initrd=True,
     )
 
-    for i in range(nets):
+    for _ in range(nets):
         vm.add_net_iface()
 
-    extra_disk_paths = []
     if blocks > 1:
         for name, diskfile in scratch_drives[: (blocks - 1)]:
             vm.add_drive(name, diskfile.path, use_ramdisk=True, io_engine="Sync")
-            extra_disk_paths.append(diskfile.path)
-        assert len(extra_disk_paths) > 0
 
     if all_devices:
         response = vm.balloon.put(
@@ -122,29 +116,21 @@ def get_snap_restore_latency(
         assert vm.api_session.is_status_no_content(response.status_code)
 
     vm.start()
-
-    # Create a snapshot builder from a microvm.
-    snapshot_builder = SnapshotBuilder(vm)
-    full_snapshot = snapshot_builder.create(
-        [vm.rootfs_file] + extra_disk_paths,
-        rootfs.ssh_key(),
-        SnapshotType.FULL,
-        net_ifaces=ifaces,
-        use_ramdisk=True,
-    )
+    snapshot = vm.snapshot_full()
     vm.kill()
+
     values = []
     for _ in range(iterations):
-        microvm, metrics_fifo = vm_builder.build_from_snapshot(
-            full_snapshot, resume=True, use_ramdisk=True
-        )
+        microvm = microvm_factory.build()
+        microvm.spawn()
+        microvm.restore_from_snapshot(snapshot, resume=True)
         # Check if guest still runs commands.
         exit_code, _, _ = microvm.ssh.execute_command("dmesg")
         assert exit_code == 0
 
         value = 0
         # Parse all metric data points in search of load_snapshot time.
-        metrics = microvm.get_all_metrics(metrics_fifo)
+        metrics = microvm.get_all_metrics()
         for data_point in metrics:
             metrics = json.loads(data_point)
             cur_value = metrics["latencies_us"]["load_snapshot"]
@@ -153,10 +139,8 @@ def get_snap_restore_latency(
                 break
         values.append(value)
         microvm.kill()
-        microvm.jailer.cleanup()
 
-    full_snapshot.cleanup()
-    vm.jailer.cleanup()
+    snapshot.delete()
     return {RESTORE_LATENCY: values}
 
 
@@ -170,7 +154,7 @@ def consume_output(cons, result):
 @pytest.mark.nonci
 @pytest.mark.parametrize("vcpu_count", [1, 2, 4, 8, 10])
 def test_snapshot_scaling_vcpus(
-    bin_cloner_path, microvm_factory, rootfs, guest_kernel, vcpu_count, st_core
+    microvm_factory, rootfs, guest_kernel, vcpu_count, st_core
 ):
     """Restore snapshots with variable vcpu count."""
     guest_config = f"{vcpu_count}vcpu_{BASE_MEM_SIZE_MIB}mb"
@@ -178,7 +162,6 @@ def test_snapshot_scaling_vcpus(
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
             "microvm_factory": microvm_factory,
             "guest_kernel": guest_kernel,
             "rootfs": rootfs,
@@ -198,7 +181,7 @@ def test_snapshot_scaling_vcpus(
 @pytest.mark.timeout(10 * 60)
 @pytest.mark.parametrize("mem_exponent", range(1, 8))
 def test_snapshot_scaling_mem(
-    bin_cloner_path, microvm_factory, rootfs, guest_kernel, mem_exponent, st_core
+    microvm_factory, rootfs, guest_kernel, mem_exponent, st_core
 ):
     """Restore snapshots with variable memory size."""
     mem_mib = BASE_MEM_SIZE_MIB * (2**mem_exponent)
@@ -207,7 +190,6 @@ def test_snapshot_scaling_mem(
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
             "microvm_factory": microvm_factory,
             "guest_kernel": guest_kernel,
             "rootfs": rootfs,
@@ -225,7 +207,7 @@ def test_snapshot_scaling_mem(
 @pytest.mark.nonci
 @pytest.mark.parametrize("net_count", range(1, 4))
 def test_snapshot_scaling_net(
-    bin_cloner_path, microvm_factory, rootfs, guest_kernel, st_core, net_count
+    microvm_factory, rootfs, guest_kernel, st_core, net_count
 ):
     """Restore snapshots with variable net device count."""
     guest_config = f"{BASE_NET_COUNT + net_count}net_dev"
@@ -233,7 +215,6 @@ def test_snapshot_scaling_net(
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
             "microvm_factory": microvm_factory,
             "guest_kernel": guest_kernel,
             "rootfs": rootfs,
@@ -252,7 +233,7 @@ def test_snapshot_scaling_net(
 @pytest.mark.nonci
 @pytest.mark.parametrize("block_count", range(1, 4))
 def test_snapshot_scaling_block(
-    bin_cloner_path, microvm_factory, rootfs, guest_kernel, st_core, block_count
+    microvm_factory, rootfs, guest_kernel, st_core, block_count
 ):
     """Restore snapshots with variable block device count."""
     guest_config = f"{BASE_BLOCK_COUNT + block_count}block_dev"
@@ -260,7 +241,6 @@ def test_snapshot_scaling_block(
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
             "microvm_factory": microvm_factory,
             "guest_kernel": guest_kernel,
             "rootfs": rootfs,
@@ -277,16 +257,13 @@ def test_snapshot_scaling_block(
 
 
 @pytest.mark.nonci
-def test_snapshot_all_devices(
-    bin_cloner_path, microvm_factory, rootfs, guest_kernel, st_core
-):
+def test_snapshot_all_devices(microvm_factory, rootfs, guest_kernel, st_core):
     """Restore snapshots with one of each devices."""
     guest_config = "all_dev"
     env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
-            "vm_builder": MicrovmBuilder(bin_cloner_path),
             "microvm_factory": microvm_factory,
             "guest_kernel": guest_kernel,
             "rootfs": rootfs,

@@ -434,7 +434,7 @@ class SnapshotLoad:
         else:
             datax = {
                 "mem_backend": {
-                    "backend_type": str(mem_backend["type"].value),
+                    "backend_type": mem_backend["type"],
                     "backend_path": mem_backend["path"],
                 },
                 "snapshot_path": snapshot_path,
