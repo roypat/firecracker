@@ -31,7 +31,9 @@ CARGO_UNITTEST_REL_PATH = os.path.join(CARGO_BUILD_REL_PATH, "test")
 @with_filelock
 def cargo_build(path, extra_args="", src_dir="", extra_env=""):
     """Trigger build depending on flags provided."""
-    cmd = "CARGO_TARGET_DIR={} {} cargo build {}".format(path, extra_env, extra_args)
+    cmd = "CARGO_TARGET_DIR={} {} cargo build --locked {}".format(
+        path, extra_env, extra_args
+    )
     if src_dir:
         cmd = "cd {} && {}".format(src_dir, cmd)
 
@@ -43,7 +45,7 @@ def cargo_test(path, extra_args=""):
     path = os.path.join(path, CARGO_UNITTEST_REL_PATH)
     cmd = (
         "CARGO_TARGET_DIR={} RUST_TEST_THREADS=1 RUST_BACKTRACE=1 "
-        'RUSTFLAGS="{}" cargo test {} --all --no-fail-fast'.format(
+        'RUSTFLAGS="{}" cargo test --locked {} --all --no-fail-fast'.format(
             path, get_rustflags(), extra_args
         )
     )
@@ -66,8 +68,8 @@ def get_firecracker_binaries():
     if not fc_bin_path.exists():
         cd_cmd = "cd {}".format(FC_WORKSPACE_DIR)
         flags = 'RUSTFLAGS="{}"'.format(get_rustflags())
-        cargo_default_cmd = f"cargo build --release --target {target}"
-        cargo_jailer_cmd = f"cargo build -p jailer --release --target {target}"
+        cargo_default_cmd = f"cargo build --locked --release --target {target}"
+        cargo_jailer_cmd = f"cargo build --locked -p jailer --release --target {target}"
         cmd = "{0} && {1} {2} && {1} {3}".format(
             cd_cmd, flags, cargo_default_cmd, cargo_jailer_cmd
         )
@@ -100,7 +102,7 @@ def run_seccompiler_bin(bpf_path, json_path=defs.SECCOMP_JSON_DIR, basic=False):
     if json_path == defs.SECCOMP_JSON_DIR:
         json_path = json_path / "{}.json".format(cargo_target)
 
-    cmd = "cargo run -p seccompiler --target-dir {} --target {} --\
+    cmd = "cargo run --locked -p seccompiler --target-dir {} --target {} --\
         --input-file {} --target-arch {} --output-file {}".format(
         defs.SECCOMPILER_TARGET_DIR,
         cargo_target,
@@ -127,7 +129,7 @@ def run_rebase_snap_bin(base_snap, diff_snap):
     """
     cargo_target = "{}-unknown-linux-musl".format(platform.machine())
 
-    cmd = "cargo run -p rebase-snap --target {} --\
+    cmd = "cargo run --locked -p rebase-snap --target {} --\
         --base-file {} --diff-file {}".format(
         cargo_target, base_snap, diff_snap
     )

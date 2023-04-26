@@ -91,7 +91,7 @@ def test_serialization_benchmark(monkeypatch, record_property):
     monkeypatch.chdir(BENCHMARK_DIRECTORY)
 
     # Run benchmark test
-    cmd = "cargo bench --target {}".format(DEFAULT_BUILD_TARGET)
+    cmd = "cargo bench --locked --target {}".format(DEFAULT_BUILD_TARGET)
     result = utils.run_cmd_sync(cmd)
     assert result.returncode == 0
 

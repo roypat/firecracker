@@ -25,5 +25,6 @@ def test_rust_clippy(target):
     @type: build
     """
     utils.run_cmd(
-        "cargo clippy --target {} --all --profile test" " -- -D warnings".format(target)
+        "cargo clippy --locked --target {} --all --profile test"
+        " -- -D warnings".format(target)
     )

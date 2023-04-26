@@ -62,7 +62,7 @@ def test_coverage(monkeypatch, record_property, metrics):
         f'\
         RUSTFLAGS="-Cinstrument-coverage" \
         LLVM_PROFILE_FILE="coverage-%p-%m.profraw" \
-        cargo test --all --target={TARGET} -- --test-threads=1 \
+        cargo test --locked --all --target={TARGET} -- --test-threads=1 \
     '
     )
 

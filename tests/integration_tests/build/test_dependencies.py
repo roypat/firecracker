@@ -26,7 +26,9 @@ def test_licenses():
     toml_file = os.path.normpath(
         os.path.join(os.path.dirname(os.path.realpath(__file__)), "../../../Cargo.toml")
     )
-    utils.run_cmd("cargo deny --manifest-path {} check licenses".format(toml_file))
+    utils.run_cmd(
+        "cargo deny --locked --manifest-path {} check licenses".format(toml_file)
+    )
 
 
 @pytest.mark.parametrize("dep_file", ["framework/dependencies.txt"])
@@ -35,7 +37,9 @@ def test_num_dependencies(dep_file):
 
     @type: build
     """
-    _, stdout, _ = utils.run_cmd("cargo tree --prefix none -e no-dev " "--workspace")
+    _, stdout, _ = utils.run_cmd(
+        "cargo tree --locked --prefix none -e no-dev " "--workspace"
+    )
     deps = stdout.splitlines()
 
     current_deps = set()
