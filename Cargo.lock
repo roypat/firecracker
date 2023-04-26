@@ -401,6 +401,7 @@ dependencies = [
  "mmds",
  "regex",
  "seccompiler",
+ "serde",
  "serde_json",
  "snapshot",
  "timerfd",
