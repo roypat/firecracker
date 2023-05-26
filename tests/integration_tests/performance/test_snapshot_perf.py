@@ -252,7 +252,6 @@ def test_snapshot_create_latency(
     rootfs,
     guest_mem_mib,
     snapshot_type,
-    firecracker_release,
     st_core,
 ):
     """
@@ -304,7 +303,7 @@ def test_snapshot_create_latency(
         func=snapshot_create_producer,
         func_kwargs={
             "vm": vm,
-            "target_version": firecracker_release.snapshot_version,
+            "target_version": None,
             "metrics_fifo": metrics_fifo,
             "snapshot_type": snapshot_type,
         },
