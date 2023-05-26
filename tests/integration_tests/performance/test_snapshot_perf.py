@@ -142,7 +142,6 @@ def test_snapshot_create_latency(
     microvm_factory,
     guest_kernel,
     rootfs,
-    firecracker_release,
     st_core,
 ):
     """Measure the latency of creating a Full snapshot"""
@@ -189,7 +188,7 @@ def test_snapshot_create_latency(
         func=snapshot_create_producer,
         func_kwargs={
             "vm": vm,
-            "target_version": firecracker_release.snapshot_version,
+            "target_version": None,
             "metrics_fifo": metrics_fifo,
         },
     )
