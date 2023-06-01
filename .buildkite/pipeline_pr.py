@@ -47,21 +47,9 @@ build_grp = group(
     **defaults,
 )
 
-functional_1_grp = group(
-    "⚙ Functional [a-n]",
-    "./tools/devtool -y test -- `cd tests; ls integration_tests/functional/test_[a-n]*.py`",
-    **defaults,
-)
-
-functional_2_grp = group(
-    "⚙ Functional [o-z]",
-    "./tools/devtool -y test -- `cd tests; ls integration_tests/functional/test_[o-z]*.py`",
-    **defaults,
-)
-
-security_grp = group(
-    "🔒 Security",
-    "./tools/devtool -y test -- ../tests/integration_tests/security/",
+functional_grp = group(
+    "⚙ Functional and security 🔒",
+    "./tools/devtool -y test -- -n 8 --dist worksteal integration_tests/functional integration_tests/security",
     **defaults,
 )
 
@@ -108,9 +96,7 @@ if not changed_files or any(
     steps += [
         kani_grp,
         build_grp,
-        functional_1_grp,
-        functional_2_grp,
-        security_grp,
+        functional_grp,
         performance_grp,
     ]
 
