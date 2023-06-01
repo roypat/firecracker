@@ -209,7 +209,7 @@ def test_snapshot_all_devices(microvm_factory, rootfs, guest_kernel, st_core):
         pytest.skip()
 
     guest_config = "all_dev"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={

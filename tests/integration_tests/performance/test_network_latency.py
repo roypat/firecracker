@@ -131,7 +131,7 @@ def test_network_latency(microvm_factory, guest_kernel, rootfs, st_core):
 
     raw_baselines = json.loads(CONFIG_NAME_ABS.read_text("utf-8"))
 
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     cons = consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
             measurements=raw_baselines["measurements"],
