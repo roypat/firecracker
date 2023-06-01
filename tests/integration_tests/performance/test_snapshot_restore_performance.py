@@ -161,7 +161,7 @@ def test_snapshot_scaling_vcpus(
 ):
     """Restore snapshots with variable vcpu count."""
     guest_config = f"{vcpu_count}vcpu_{BASE_MEM_SIZE_MIB}mb"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -189,7 +189,7 @@ def test_snapshot_scaling_mem(
     """Restore snapshots with variable memory size."""
     mem_mib = BASE_MEM_SIZE_MIB * (2**mem_exponent)
     guest_config = f"{BASE_VCPU_COUNT}vcpu_{mem_mib}mb"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -214,7 +214,7 @@ def test_snapshot_scaling_net(
 ):
     """Restore snapshots with variable net device count."""
     guest_config = f"{BASE_NET_COUNT + net_count}net_dev"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -240,7 +240,7 @@ def test_snapshot_scaling_block(
 ):
     """Restore snapshots with variable block device count."""
     guest_config = f"{BASE_BLOCK_COUNT + block_count}block_dev"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={
@@ -263,7 +263,7 @@ def test_snapshot_scaling_block(
 def test_snapshot_all_devices(microvm_factory, rootfs, guest_kernel, st_core):
     """Restore snapshots with one of each devices."""
     guest_config = "all_dev"
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{guest_config}"
+    env_id = f"{st_core.env_id_prefix}/{guest_config}"
     st_prod = st.producer.LambdaProducer(
         func=get_snap_restore_latency,
         func_kwargs={

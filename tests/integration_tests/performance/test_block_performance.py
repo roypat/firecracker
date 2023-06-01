@@ -285,7 +285,7 @@ def test_block_performance(
         }
     )
 
-    env_id = f"{guest_kernel.name}/{rootfs.name}/{io_engine.lower()}_{microvm_cfg}"
+    env_id = f"{st_core.env_id_prefix}/{io_engine.lower()}_{microvm_cfg}"
 
     for mode in CONFIG["fio_modes"]:
         for bs in CONFIG["fio_blk_sizes"]:
