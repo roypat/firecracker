@@ -70,10 +70,13 @@ def test_restore_current_to_old(microvm_factory, uvm_plain, firecracker_release)
         pytest.skip("incompatible with Firecracker <1.2.0")
 
     # Microvm: 2vCPU 256MB RAM, balloon, 4 disks and 4 net devices.
+    vm = uvm_plain
+    vm.spawn()
+    vm.basic_config(track_dirty_pages=True)
 
     # Create a snapshot with current FC version targeting the old version.
     snapshot = create_snapshot_helper(
-        uvm_nano,
+        vm,
         target_version=firecracker_release.snapshot_version,
         drives=scratch_drives,
         balloon=True,
@@ -156,10 +159,9 @@ def create_snapshot_helper(
 
     if balloon:
         # Add a memory balloon with stats enabled.
-        response = vm.balloon.put(
+        vm.api.balloon.put(
             amount_mib=0, deflate_on_oom=True, stats_polling_interval_s=1
         )
-        assert vm.api_session.is_status_no_content(response.status_code)
 
     test_drives = [] if drives is None else drives
 

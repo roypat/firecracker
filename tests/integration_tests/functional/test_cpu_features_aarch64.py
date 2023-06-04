@@ -119,7 +119,7 @@ def test_cpu_features_with_custom_template(test_microvm_with_api, custom_cpu_tem
     vm = test_microvm_with_api
     vm.spawn()
     vm.basic_config()
-    vm.cpu_config(custom_cpu_template["template"])
+    vm.api.cpu_config(custom_cpu_template["template"])
     vm.add_net_iface()
     vm.start()
     _check_cpu_features_arm(vm, custom_cpu_template["name"])
