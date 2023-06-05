@@ -27,7 +27,6 @@ TEST_ID = "block_performance"
 kernel_version = get_kernel_version(level=1)
 CONFIG_NAME_REL = "test_{}_config_{}.json".format(TEST_ID, kernel_version)
 CONFIG_NAME_ABS = os.path.join(defs.CFG_LOCATION, CONFIG_NAME_REL)
-CONFIG = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
 
 DEBUG = False
 FIO = "fio"
@@ -54,10 +53,10 @@ RUNTIME_SEC = 300
 class BlockBaselinesProvider(BaselineProvider):
     """Implementation of a baseline provider for the block performance test."""
 
-    def __init__(self, env_id, fio_id):
+    def __init__(self, env_id, fio_id, raw_baselines):
         """Block baseline provider initialization."""
-        baseline = self.read_baseline(CONFIG)
-        super().__init__(DictQuery(baseline))
+        super().__init__(raw_baselines)
+
         self._tag = "baselines/{}/" + env_id + "/{}/" + fio_id
 
     def get(self, ms_name: str, st_name: str) -> dict:
@@ -314,9 +313,13 @@ def test_block_performance(
             "bs": fio_block_size,
         },
     )
+
+    raw_baselines = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
+
     st_cons = st.consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
-            CONFIG["measurements"], BlockBaselinesProvider(env_id, fio_id)
+            raw_baselines["measurements"],
+            BlockBaselinesProvider(env_id, fio_id, raw_baselines),
         ),
         func=consume_fio_output,
         func_kwargs={
