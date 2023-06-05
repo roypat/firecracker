@@ -6,8 +6,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -360,8 +360,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10-no-sve.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10-no-sve": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -644,8 +644,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -1009,8 +1009,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -1363,8 +1363,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -1710,8 +1710,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -2050,8 +2050,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -2401,8 +2401,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -2741,8 +2741,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -3092,8 +3092,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -3432,8 +3432,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -3783,8 +3783,8 @@
                     {
                         "baselines": {
                             "latency": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {
@@ -4123,8 +4123,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "10vcpu_128mb": {
                                             "P50": {
                                                 "restore": {

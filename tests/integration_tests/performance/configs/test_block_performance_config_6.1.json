@@ -14,8 +14,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -66,8 +66,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -120,8 +120,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -156,8 +156,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -194,8 +194,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -246,8 +246,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -300,8 +300,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -352,8 +352,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -415,8 +415,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -467,8 +467,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -521,8 +521,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -557,8 +557,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -595,8 +595,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -647,8 +647,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -701,8 +701,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -753,8 +753,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -812,8 +812,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -864,8 +864,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -918,8 +918,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -954,8 +954,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -992,8 +992,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1044,8 +1044,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1098,8 +1098,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1150,8 +1150,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1213,8 +1213,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1265,8 +1265,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1319,8 +1319,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -1355,8 +1355,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -1393,8 +1393,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1445,8 +1445,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1499,8 +1499,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1551,8 +1551,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1614,8 +1614,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1666,8 +1666,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1720,8 +1720,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -1756,8 +1756,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -1794,8 +1794,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1846,8 +1846,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1900,8 +1900,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -1952,8 +1952,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2015,8 +2015,8 @@
                     {
                         "baselines": {
                             "bw_read": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2067,8 +2067,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2121,8 +2121,8 @@
                                 }
                             },
                             "bw_write": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -2157,8 +2157,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randrw-bs4096": {
@@ -2195,8 +2195,8 @@
                                 }
                             },
                             "cpu_utilization_vcpus_total": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2247,8 +2247,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2301,8 +2301,8 @@
                                 }
                             },
                             "cpu_utilization_vmm": {
-                                "vmlinux-4.14.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-4.14": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
@@ -2353,8 +2353,8 @@
                                         }
                                     }
                                 },
-                                "vmlinux-5.10.bin": {
-                                    "ubuntu-18.04.ext4": {
+                                "linux-5.10": {
+                                    "ubuntu-22.04.squashfs": {
                                         "async_1vcpu_1024mb.json": {
                                             "Avg": {
                                                 "randread-bs4096": {
