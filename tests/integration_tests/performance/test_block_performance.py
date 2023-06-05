@@ -212,8 +212,6 @@ def read_values(cons, numjobs, env_id, mode, bs, measurement, logs_path):
         lines = file.readlines()
 
         direction_count = 1
-        if mode.endswith("rw"):
-            direction_count = 2
 
         for idx in range(0, len(lines), direction_count):
             value_idx = idx // direction_count
@@ -255,7 +253,7 @@ def consume_fio_output(cons, result, numjobs, mode, bs, env_id, logs_path):
 @pytest.mark.nonci
 @pytest.mark.timeout(RUNTIME_SEC * 1000)  # 1.40 hours
 @pytest.mark.parametrize("vcpus", [1, 2], ids=["1vcpu", "2vcpu"])
-@pytest.mark.parametrize("fio_mode", ["randread", "randrw"])
+@pytest.mark.parametrize("fio_mode", ["randread", "randwrite"])
 @pytest.mark.parametrize("fio_block_size", [4096], ids=["bs4096"])
 def test_block_performance(
     microvm_factory,
