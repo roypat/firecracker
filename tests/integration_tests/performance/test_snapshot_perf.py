@@ -196,7 +196,6 @@ def test_older_snapshot_resume_latency(
     vm = microvm_factory.build(
         guest_kernel,
         rootfs,
-        monitor_memory=False,
         fc_binary_path=firecracker_release.path,
         jailer_binary_path=firecracker_release.jailer,
     )
@@ -266,7 +265,7 @@ def test_snapshot_create_latency(
     diff_snapshots = snapshot_type == SnapshotType.DIFF
     vcpus = 2
     microvm_cfg = f"{vcpus}vcpu_{guest_mem_mib}mb.json"
-    vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
+    vm = microvm_factory.build(guest_kernel, rootfs)
     metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
     metrics_fifo = log_tools.Fifo(metrics_fifo_path)
     vm.spawn(metrics_path=metrics_fifo_path)
@@ -348,7 +347,7 @@ def test_snapshot_resume_latency(
     diff_snapshots = snapshot_type == SnapshotType.DIFF
     vcpus = 2
     microvm_cfg = f"{vcpus}vcpu_{guest_mem_mib}mb.json"
-    vm = microvm_factory.build(guest_kernel, rootfs, monitor_memory=False)
+    vm = microvm_factory.build(guest_kernel, rootfs)
     metrics_fifo_path = os.path.join(vm.path, "metrics_fifo")
     metrics_fifo = log_tools.Fifo(metrics_fifo_path)
     vm.spawn(metrics_path=metrics_fifo_path)

@@ -33,10 +33,6 @@ def test_generic_signal_handler(test_microvm_with_api, signum):
     """
     microvm = test_microvm_with_api
     microvm.spawn()
-
-    # We don't need to monitor the memory for this test.
-    microvm.memory_monitor = None
-
     microvm.basic_config()
 
     # Configure metrics based on a file.
@@ -80,9 +76,6 @@ def test_sigxfsz_handler(uvm_plain_rw):
     """
     microvm = uvm_plain_rw
     microvm.spawn()
-
-    # We don't need to monitor the memory for this test.
-    microvm.memory_monitor = None
 
     # We need to use the Sync file engine type. If we use io_uring we will not
     # get a SIGXFSZ. We'll instead get an errno 27 File too large as the
@@ -129,9 +122,6 @@ def test_handled_signals(test_microvm_with_api):
     """
     microvm = test_microvm_with_api
     microvm.spawn()
-
-    # We don't need to monitor the memory for this test.
-    microvm.memory_monitor = None
 
     microvm.basic_config(vcpu_count=2)
     microvm.add_net_iface()
