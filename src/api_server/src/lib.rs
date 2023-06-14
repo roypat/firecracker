@@ -13,12 +13,10 @@ mod request;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use logger::{
-    debug, error, info, update_metric_with_elapsed_time, warn, ProcessTimeReporter, METRICS,
-};
+use logger::{debug, error, info, warn, ProcessTimeReporter, StoreMetric, METRICS};
 pub use micro_http::{
     Body, HttpServer, Method, Request, RequestError, Response, ServerError, ServerRequest,
-    ServerResponse, StatusCode, Version,
+    ServerResponse, ServerTiming, StatusCode, Version,
 };
 use seccompiler::BpfProgramRef;
 use serde_json::json;
@@ -278,12 +276,15 @@ impl ApiServer {
             .expect("Failed to send VMM message");
         self.to_vmm_fd.write(1).expect("Cannot update send VMM fd");
         let vmm_outcome = *(self.vmm_response_receiver.recv().expect("VMM disconnected"));
-        let response = ParsedRequest::convert_to_response(&vmm_outcome);
+        let mut response = ParsedRequest::convert_to_response(&vmm_outcome);
+
+        let elapsed_time_us = utils::time::get_time_us(utils::time::ClockType::Monotonic)
+            - request_processing_start_us;
+        response.add_timing(ServerTiming::new("fc", elapsed_time_us as f64 / 1_000f64));
 
         if vmm_outcome.is_ok() {
             if let Some((metric, action)) = metric_with_action {
-                let elapsed_time_us =
-                    update_metric_with_elapsed_time(metric, request_processing_start_us);
+                metric.store(elapsed_time_us as usize);
                 info!("'{}' API request took {} us.", action, elapsed_time_us);
             }
         }

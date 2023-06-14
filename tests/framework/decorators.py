@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Module for declaring decorators used throughout integration tests."""
 
-import time
+import re
 
 from framework.defs import MAX_API_CALL_DURATION_MS
 
@@ -22,9 +22,14 @@ def timed_request(method):
 
     def timed(*args, **kwargs):
         """Raise an exception if method's duration exceeds the max value."""
-        start = time.time()
-        result = method(*args, **kwargs)
-        duration_ms = (time.time() - start) * 1000
+        response = method(*args, **kwargs)
+        timing_header = response.headers["Server-Timing"]
+
+        FC_METRIC_REGEX = re.compile("fc;dur=(?P<duration_ms>\d+.\d{2})")
+
+        match = FC_METRIC_REGEX.match(timing_header)
+
+        duration_ms = float(match.group("duration_ms"))
 
         if duration_ms > MAX_API_CALL_DURATION_MS:
             try:
@@ -43,6 +48,6 @@ def timed_request(method):
                 duration_ms, method.__name__.upper(), resource, payload
             )
 
-        return result
+        return response
 
     return timed
