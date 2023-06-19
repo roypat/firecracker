@@ -147,7 +147,9 @@ def test_network_latency(
     st_core.iterations = 30
     st_core.custom["guest_config"] = guest_config.removesuffix(".json")
 
-    raw_baselines = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
+    with open(CONFIG_NAME_ABS, encoding="utf-8") as file:
+        raw_baselines = json.load(file)
+
     env_id = f"{guest_kernel.name()}/{rootfs.name()}/{guest_config}"
     cons = consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
