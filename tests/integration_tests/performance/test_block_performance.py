@@ -172,8 +172,8 @@ def read_values(cons, numjobs, env_id, mode, bs, measurement, logs_path):
             f"{logs_path}/{env_id}/{mode}{bs}/{mode}"
             f"{bs}_{measurement}.{job_id + 1}.log"
         )
-        file = open(file_path, encoding="utf-8")
-        lines = file.readlines()
+        with open(file_path, encoding="utf-8") as file:
+            lines = file.readlines()
 
         direction_count = 1
         if mode.endswith("rw"):
