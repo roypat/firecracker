@@ -45,6 +45,10 @@ SUPPORTED_HOST_KERNELS = ["4.14", "5.10", "6.1"]
 SUPPORTED_KERNELS = [r"vmlinux-4.14.\d+", r"vmlinux-5.10.\d+"]
 SUPPORTED_KERNELS_NO_SVE = [r"vmlinux-4.14.\d+", r"vmlinux-5.10.\d+-no-sve"]
 
-ARTIFACT_DIR = (
-    Path(__file__).parent.joinpath("../../build/img").resolve() / platform.machine()
-)
+IMG_DIR = Path(DEFAULT_TEST_SESSION_ROOT_PATH) / "img"
+
+# fall-back to the local directory
+if not IMG_DIR.exists():
+    IMG_DIR = Path(__file__).parent.joinpath("../../build/img").resolve()
+
+ARTIFACT_DIR = IMG_DIR / platform.machine()
