@@ -233,7 +233,9 @@ def pipe(basevm, current_avail_cpu, env_id, mode, payload_length):
 
     iperf3_id = f"vsock-p{payload_length}-{mode}"
 
-    raw_baselines = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
+    with open(CONFIG_NAME_ABS, encoding="utf-8") as file:
+        raw_baselines = json.load(file)
+
     cons = consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
             raw_baselines["measurements"],

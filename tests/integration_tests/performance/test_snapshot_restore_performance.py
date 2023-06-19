@@ -72,7 +72,9 @@ def get_scratch_drives():
 
 def default_lambda_consumer(env_id, workload):
     """Create a default lambda consumer for the snapshot restore test."""
-    raw_baselines = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
+    with open(CONFIG_NAME_ABS, encoding="utf-8") as file:
+        raw_baselines = json.load(file)
+
     return st.consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
             raw_baselines["measurements"],

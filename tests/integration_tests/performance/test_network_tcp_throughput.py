@@ -248,7 +248,9 @@ def pipe(basevm, mode, payload_length, current_avail_cpu, host_ip, env_id):
 
     iperf3_id = f"tcp-p{payload_length}-wsDEFAULT-{mode}"
 
-    raw_baselines = json.load(open(CONFIG_NAME_ABS, encoding="utf-8"))
+    with open(CONFIG_NAME_ABS, encoding="utf-8") as file:
+        raw_baselines = json.load(file)
+
     cons = consumer.LambdaConsumer(
         metadata_provider=DictMetadataProvider(
             measurements=raw_baselines["measurements"],
