@@ -453,6 +453,7 @@ class Microvm:
         if log_level != "Debug":
             # Checking the timings requires DEBUG level log messages
             self.time_api_requests = False
+        self.time_api_requests = False
 
         # When the daemonize flag is on, we want to clone-exec into the
         # jailer rather than executing it via spawning a shell. Going
