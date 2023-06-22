@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from framework.defs import TEST_RESULTS_DIR
 from framework.stats import consumer, producer
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
@@ -37,13 +38,7 @@ DURATION = "duration"
 BASE_PORT = 5201
 CPU_UTILIZATION_VMM = "cpu_utilization_vmm"
 CPU_UTILIZATION_VCPUS_TOTAL = "cpu_utilization_vcpus_total"
-IPERF3_CPU_UTILIZATION_PERCENT_OUT_TAG = "cpu_utilization_percent"
 IPERF3_END_RESULTS_TAG = "end"
-TARGET_TAG = "target"
-DELTA_PERCENTAGE_TAG = "delta_percentage"
-THROUGHPUT_UNIT = "Mbps"
-DURATION_UNIT = "seconds"
-CPU_UTILIZATION_UNIT = "percentage"
 
 # How many clients/servers should be spawned per vcpu
 LOAD_FACTOR = 1
@@ -56,6 +51,7 @@ RUNTIME_SEC = 20
 
 # Dictionary mapping modes (guest-to-host, host-to-guest, bidirectional) to arguments passed to the iperf3 clients spawned
 MODE_MAP = {"bd": ["", "-R"], "g2h": [""], "h2g": ["-R"]}
+REV_MODE_MAP = {"": "g2h", "-R": "h2g"}
 
 
 # pylint: disable=R0903
@@ -160,43 +156,37 @@ def produce_iperf_output(
                 )
             )
 
-        cpu_load = cpu_load_future.result()
-        for future in futures[:-1]:
-            res = json.loads(future.result())
-            res[IPERF3_END_RESULTS_TAG][IPERF3_CPU_UTILIZATION_PERCENT_OUT_TAG] = None
-            yield res
+        data = {"cpu_load_raw": cpu_load_future.result(), "g2h": [], "h2g": []}
 
-        # Attach the real CPU utilization vmm/vcpus to
-        # the last iperf3 server-client pair measurements.
-        res = json.loads(futures[-1].result())
+        for i, future in enumerate(futures):
+            data[REV_MODE_MAP[modes[i % modes_len]]].append(json.loads(future.result()))
 
-        vmm_util, vcpu_util = summarize_cpu_percent(cpu_load)
-        res[IPERF3_END_RESULTS_TAG][IPERF3_CPU_UTILIZATION_PERCENT_OUT_TAG] = {
-            CPU_UTILIZATION_VMM: vmm_util,
-            CPU_UTILIZATION_VCPUS_TOTAL: vcpu_util,
-        }
-
-        yield res
+        return data
 
 
-def consume_iperf_output(cons, result):
-    """Consume iperf3 output result for TCP workload."""
-    total_received = result[IPERF3_END_RESULTS_TAG]["sum_received"]
-    duration = float(total_received["seconds"])
-    cons.consume_data(DURATION, duration)
+def consume_iperf_output(cons, result, env_id, iperf3_id):
+    """Consume iperf3 output result for vsock workload."""
 
-    # Computed at the receiving end.
-    total_recv_bytes = int(total_received["bytes"])
-    tput = round((total_recv_bytes * 8) / (1024 * 1024 * duration), 2)
-    cons.consume_data(THROUGHPUT, tput)
+    for iperf3_raw in result["g2h"] + result["h2g"]:
+        total_received = iperf3_raw[IPERF3_END_RESULTS_TAG]["sum_received"]
+        duration = float(total_received["seconds"])
+        cons.consume_data(DURATION, duration)
 
-    cpu_util = result[IPERF3_END_RESULTS_TAG][IPERF3_CPU_UTILIZATION_PERCENT_OUT_TAG]
-    if cpu_util:
-        cpu_util_host = cpu_util[CPU_UTILIZATION_VMM]
-        cpu_util_guest = cpu_util[CPU_UTILIZATION_VCPUS_TOTAL]
+        # Computed at the receiving end.
+        total_recv_bytes = int(total_received["bytes"])
+        tput = round((total_recv_bytes * 8) / (1024 * 1024 * duration), 2)
+        cons.consume_data(THROUGHPUT, tput)
 
-        cons.consume_stat("Avg", CPU_UTILIZATION_VMM, cpu_util_host)
-        cons.consume_stat("Avg", CPU_UTILIZATION_VCPUS_TOTAL, cpu_util_guest)
+    vmm_util, vcpu_util = summarize_cpu_percent(result["cpu_load_raw"])
+
+    cons.consume_stat("Avg", CPU_UTILIZATION_VMM, vmm_util)
+    cons.consume_stat("Avg", CPU_UTILIZATION_VCPUS_TOTAL, vcpu_util)
+
+    with open(
+        TEST_RESULTS_DIR / f'{env_id.replace("/", "-")}-{iperf3_id}-raw.ndjson', "a"
+    ) as file:
+        json.dump(result, file)
+        file.write("\n")
 
 
 def pipe(basevm, current_avail_cpu, env_id, mode, payload_length):
@@ -226,6 +216,7 @@ def pipe(basevm, current_avail_cpu, env_id, mode, payload_length):
             VsockThroughputBaselineProvider(env_id, iperf3_id, raw_baselines),
         ),
         func=consume_iperf_output,
+        func_kwargs={"env_id": env_id, "iperf3_id": iperf3_id},
     )
 
     prod_kwargs = {
