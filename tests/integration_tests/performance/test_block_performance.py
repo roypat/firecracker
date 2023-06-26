@@ -12,11 +12,11 @@ import pytest
 
 import framework.stats as st
 import host_tools.drive as drive_tools
+from framework.defs import TEST_RESULTS_DIR
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
 from framework.utils import (
     CmdBuilder,
-    DictQuery,
     get_cpu_percent,
     get_kernel_version,
     run_cmd,
@@ -29,12 +29,10 @@ kernel_version = get_kernel_version(level=1)
 CONFIG_NAME_REL = "test_{}_config_{}.json".format(TEST_ID, kernel_version)
 CONFIG_NAME_ABS = os.path.join(defs.CFG_LOCATION, CONFIG_NAME_REL)
 
-DEBUG = False
 FIO = "fio"
 
 # Measurements tags.
 CPU_UTILIZATION_VMM = "cpu_utilization_vmm"
-CPU_UTILIZATION_VMM_SAMPLES_TAG = "cpu_utilization_vmm_samples"
 CPU_UTILIZATION_VCPUS_TOTAL = "cpu_utilization_vcpus_total"
 
 # size of the block device used in the test, in MB
@@ -141,12 +139,7 @@ def run_fio(env_id, basevm, mode, bs):
         rc, _, stderr = basevm.ssh.execute_command("rm *.log")
         assert rc == 0, stderr.read()
 
-        cpu_load = cpu_load_future.result()
-
-        vmm_util, vcpu_util = summarize_cpu_percent(cpu_load)
-        result = {CPU_UTILIZATION_VMM: vmm_util, CPU_UTILIZATION_VCPUS_TOTAL: vcpu_util}
-
-        return result
+        return cpu_load_future.result()
 
 
 class DataDirection(Enum):
@@ -210,20 +203,28 @@ def read_values(cons, numjobs, env_id, mode, bs, measurement, logs_path):
                 continue
 
             value = sum(value_indexes[idx])
-            if DEBUG:
-                cons.consume_custom(measurement_id, value)
             cons.consume_data(measurement_id, value)
 
+    return values
 
-def consume_fio_output(cons, result, numjobs, mode, bs, env_id, logs_path):
+
+def consume_fio_output(cons, result, numjobs, mode, bs, env_id, fio_id, logs_path):
     """Consumer function."""
-    cpu_utilization_vmm = result[CPU_UTILIZATION_VMM]
-    cpu_utilization_vcpus = result[CPU_UTILIZATION_VCPUS_TOTAL]
 
-    cons.consume_stat("Avg", CPU_UTILIZATION_VMM, cpu_utilization_vmm)
-    cons.consume_stat("Avg", CPU_UTILIZATION_VCPUS_TOTAL, cpu_utilization_vcpus)
+    vmm_util, vcpu_util = summarize_cpu_percent(result)
 
-    read_values(cons, numjobs, env_id, mode, bs, "bw", logs_path)
+    cons.consume_stat("Avg", CPU_UTILIZATION_VMM, vmm_util)
+    cons.consume_stat("Avg", CPU_UTILIZATION_VCPUS_TOTAL, vcpu_util)
+
+    values = read_values(cons, numjobs, env_id, mode, bs, "bw", logs_path)
+
+    result.update(values)
+
+    filename = f'{env_id.replace("/", "-")}-{fio_id}-raw.ndjson'
+
+    with open(TEST_RESULTS_DIR / filename, "a") as file:
+        json.dump(result, file)
+        file.write("\n")  # pyjson does not add newlines
 
 
 @pytest.mark.nonci
@@ -303,6 +304,7 @@ def test_block_performance(
             "mode": fio_mode,
             "bs": fio_block_size,
             "env_id": env_id,
+            "fio_id": fio_id,
             "logs_path": vm.jailer.chroot_base_with_id(),
         },
     )
