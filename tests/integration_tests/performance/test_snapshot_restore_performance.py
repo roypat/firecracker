@@ -13,6 +13,7 @@ import framework.stats as st
 import host_tools.drive as drive_tools
 from framework.artifacts import create_net_devices_configuration
 from framework.builder import MicrovmBuilder, SnapshotBuilder, SnapshotType
+from framework.defs import TEST_RESULTS_DIR
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
 from framework.utils import DictQuery, get_kernel_version
@@ -81,7 +82,7 @@ def default_lambda_consumer(env_id, workload):
             SnapRestoreBaselinesProvider(env_id, workload, raw_baselines),
         ),
         func=consume_output,
-        func_kwargs={},
+        func_kwargs={"env_id": env_id},
     )
 
 
@@ -179,11 +180,17 @@ def get_snap_restore_latency(
     return {RESTORE_LATENCY: values}
 
 
-def consume_output(cons, result):
+def consume_output(cons, result, env_id):
     """Consumer function."""
     restore_latency = result[RESTORE_LATENCY]
     for value in restore_latency:
         cons.consume_data(RESTORE_LATENCY, value)
+
+    filename = f'{env_id.replace("/", "-")}-raw.ndjson'
+
+    with open(TEST_RESULTS_DIR / filename, "a") as file:
+        json.dump(result, file)
+        file.write("\n")  # pyjson does not add newlines
 
 
 @pytest.mark.nonci
