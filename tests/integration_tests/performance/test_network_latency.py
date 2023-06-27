@@ -9,6 +9,7 @@ import re
 import pytest
 
 from framework.artifacts import DEFAULT_HOST_IP
+from framework.defs import TEST_RESULTS_DIR
 from framework.stats import consumer, producer
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
@@ -51,7 +52,7 @@ class NetLatencyBaselineProvider(BaselineProvider):
         return None
 
 
-def consume_ping_output(cons, raw_data, requests):
+def consume_ping_output(cons, raw_data, requests, env_id):
     """Consume ping output.
 
     Output example:
@@ -65,7 +66,6 @@ def consume_ping_output(cons, raw_data, requests):
     4 packets transmitted, 4 received, 0% packet loss, time 3005ms
     rtt min/avg/max/mdev = 17.478/17.705/17.808/0.210 ms
     """
-    st_keys = ["Min", "Avg", "Max", "Stddev"]
 
     output = raw_data.strip().split("\n")
     assert len(output) > 2
@@ -76,10 +76,7 @@ def consume_ping_output(cons, raw_data, requests):
     stat_values = re.findall(pattern_stats, stat_values)[0]
     assert len(stat_values) == 4
 
-    for index, stat_value in enumerate(stat_values[:4]):
-        cons.consume_stat(
-            st_name=st_keys[index], ms_name=LATENCY, value=float(stat_value)
-        )
+    cons.consume_stat("Avg", ms_name=LATENCY, value=float(stat_values[1]))
 
     # Compute percentiles.
     seqs = output[1 : requests + 1]
@@ -90,16 +87,11 @@ def consume_ping_output(cons, raw_data, requests):
         assert len(time) == 1
         times.append(time[0])
 
-    times.sort()
-    cons.consume_stat(
-        st_name="Percentile50", ms_name=LATENCY, value=times[int(requests * 0.5)]
-    )
-    cons.consume_stat(
-        st_name="Percentile90", ms_name=LATENCY, value=times[int(requests * 0.9)]
-    )
-    cons.consume_stat(
-        st_name="Percentile99", ms_name=LATENCY, value=times[int(requests * 0.99)]
-    )
+    filename = f'{env_id.replace("/", "-")}-raw.ndjson'
+
+    with open(TEST_RESULTS_DIR / filename, "a") as file:
+        json.dump(times, file)
+        file.write("\n")  # pyjson does not add newlines
 
 
 @pytest.mark.nonci
@@ -152,7 +144,7 @@ def test_network_latency(
             baseline_provider=NetLatencyBaselineProvider(env_id, raw_baselines),
         ),
         func=consume_ping_output,
-        func_kwargs={"requests": requests},
+        func_kwargs={"requests": requests, "env_id": env_id},
     )
     cmd = PING.format(requests, interval, DEFAULT_HOST_IP)
     prod = producer.SSHCommand(cmd, vm.ssh)
