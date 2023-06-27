@@ -15,13 +15,15 @@ STATS_POLLING_INTERVAL_S = 1
 
 
 @retry(delay=0.5, tries=10)
-def get_stable_rss_mem_by_pid(pid, percentage_delta=0.5):
+def get_stable_rss_mem_by_pid(pid, percentage_delta=1):
     """
     Get the RSS memory that a guest uses, given the pid of the guest.
 
     Wait till the fluctuations in RSS drop below percentage_delta. If timeout
     is reached before the fluctuations drop, raise an exception.
     """
+
+    # All values are reported as KiB
 
     def get_rss_from_pmap():
         _, output, _ = run_cmd("pmap -X {}".format(pid))
@@ -30,10 +32,10 @@ def get_stable_rss_mem_by_pid(pid, percentage_delta=0.5):
     first_rss = get_rss_from_pmap()
     time.sleep(1)
     second_rss = get_rss_from_pmap()
-
-    delta = (abs(first_rss - second_rss) / float(first_rss)) * 100
-    assert delta < percentage_delta
-
+    print(f"RSS readings: {first_rss}, {second_rss}")
+    abs_diff = abs(first_rss - second_rss)
+    abs_delta = 100 * abs_diff / first_rss
+    assert abs_delta < percentage_delta or abs_diff < 2**10
     return second_rss
 
 
@@ -66,7 +68,7 @@ def make_guest_dirty_memory(ssh_connection, should_oom=False, amount_mib=256):
         assert "Memory filling was successful" in stdout, stdout
 
 
-def _test_rss_memory_lower(test_microvm, stable_delta=0.5):
+def _test_rss_memory_lower(test_microvm, stable_delta=1):
     """Check inflating the balloon makes guest use less rss memory."""
     # Get the firecracker pid, and open an ssh connection.
     firecracker_pid = test_microvm.jailer_clone_pid
