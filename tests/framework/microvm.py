@@ -17,6 +17,7 @@ import os
 import re
 import select
 import shutil
+import subprocess
 import time
 import uuid
 from collections import namedtuple
@@ -162,6 +163,7 @@ class Microvm:
         self.rootfs_file = None
         self.ssh_key = None
         self.initrd_file = None
+        self.boot_args = None
 
         # The binaries this microvm will use to start.
         self._fc_binary_path = fc_binary_path
@@ -548,9 +550,11 @@ class Microvm:
         )
         self.vcpus_count = vcpu_count
 
+        if boot_args is not None:
+            self.boot_args = boot_args
         boot_source_args = {
             "kernel_image_path": self.create_jailed_resource(self.kernel_file),
-            "boot_args": boot_args,
+            "boot_args": self.boot_args,
         }
 
         if use_initrd and self.initrd_file is not None:
@@ -772,6 +776,36 @@ class Microvm:
     def ssh(self):
         """Return a cached SSH connection on the 1st interface"""
         return self.ssh_iface(0)
+
+    def gdbserver(self, port=2000):
+        """Attach gdbserver to the FC process"""
+        comm = f"localhost:{port}"
+        subprocess.Popen(["gdbserver", "--attach", comm, str(self.jailer_clone_pid)])
+        docker_ip = utils.run_cmd(
+            "ip -j address show eth0 |jq -r '.[].addr_info[].local'"
+        ).stdout.strip()
+        print(f"Connect gdb with:\n\tgdb --ex 'target remote {docker_ip}:{port}'")
+
+    def print_log(self):
+        """Helper to print the firecracker log"""
+        print(self.log_data)
+
+    def print_ssh(self):
+        """Helper to print how to SSH to the microvm
+
+        This may be useful for example to get a terminal
+        """
+        ip = self.iface["eth0"]["iface"].guest_ip
+        cmd = f"ip netns exec {self.jailer.netns} ssh -i {self.ssh_key} root@{ip}"
+        print(cmd)
+
+    def enable_console(self):
+        """Helper method to attach a console, before the machine boots"""
+        # TBD if basic_config was already started, raise
+        if self.boot_args is None:
+            self.boot_args = ""
+        self.boot_args += "console=ttyS0 reboot=k panic=1"
+        self.jailer.daemonize = False
 
 
 class MicroVMFactory:
