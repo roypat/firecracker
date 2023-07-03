@@ -86,6 +86,7 @@ def st_core(metrics, results_file_dumper, guest_kernel, rootfs, request):
     """Helper fixture to dump results and publish metrics"""
     stats = core.Core()
     guest_kernel_ver = guest_kernel.stem[2:]
+    stats.check_baseline = request.config.getoption("--perf-fail")
     stats.env_id_prefix = f"{guest_kernel_ver}/{rootfs.name}"
     stats.iterations = 1
     stats.custom = {
