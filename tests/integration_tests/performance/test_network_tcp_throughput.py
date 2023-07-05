@@ -28,7 +28,7 @@ LOAD_FACTOR = 1
 WARMUP_SEC = 5
 
 # Time (in seconds) for which iperf runs after warmup is done
-RUNTIME_SEC = 20
+RUNTIME_SEC = 200
 
 
 # pylint: disable=R0903

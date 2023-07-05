@@ -35,7 +35,7 @@ perf_test = {
         "label": "🖧 Network TCP Throughput",
         "test_path": "integration_tests/performance/test_network_tcp_throughput.py",
         "devtool_opts": "-c 1-10 -m 0",
-        "timeout_in_minutes": 45,
+        "timeout_in_minutes": 450,
     },
 }
 
