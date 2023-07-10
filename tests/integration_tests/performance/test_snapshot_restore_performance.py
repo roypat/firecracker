@@ -91,7 +91,7 @@ def get_snap_restore_latency(
     vcpus,
     mem_size,
     nets=1,
-    blocks=1,
+    blocks=3,
     all_devices=False,
     iterations=10,
 ):
@@ -181,12 +181,13 @@ def consume_output(cons, result):
     """Consumer function."""
     restore_latency = result[RESTORE_LATENCY]
     for value in restore_latency:
+        print(value)
         yield RESTORE_LATENCY, value, "Milliseconds"
         cons.consume_data(RESTORE_LATENCY, value)
 
 
 @pytest.mark.nonci
-@pytest.mark.parametrize("vcpu_count", [1, 2, 4, 8, 10])
+@pytest.mark.parametrize("vcpu_count", [1, 2, 4, 6, 8, 10])
 def test_snapshot_scaling_vcpus(
     bin_cloner_path, microvm_factory, rootfs, guest_kernel, vcpu_count, st_core
 ):
