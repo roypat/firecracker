@@ -147,13 +147,28 @@ def _configure_and_run_vm(microvm, network=False, initrd=False):
 
 
 @pytest.mark.parametrize(
-    "vcpu_count,mem_size_mib",
-    [(1, 128), (1, 1024), (2, 2024), (4, 4096)],
+    "mem_size_mib, vcpu_count",
+    [
+        (40, 1),
+        (64, 1),
+        (128, 1),
+        (1024, 1),
+        (2048, 2),
+        (4096, 3),
+        (6144, 4),
+        (8192, 5),
+        (10240, 6),
+        (12288, 7),
+    ],
 )
 def test_boottime(
     microvm_factory, guest_kernel, rootfs, vcpu_count, mem_size_mib, metrics
 ):
     """Test boot time with different guest configurations"""
+    if "4.14" not in guest_kernel.name:
+        pytest.skip(
+            "4.14 has best boot time in firecracker, so we only use it as baseline"
+        )
 
     metrics.set_dimensions(
         {
