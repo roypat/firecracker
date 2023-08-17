@@ -248,7 +248,7 @@ class Microvm:
         self._screen_pid = None
         self._screen_log = None
 
-        self.time_api_requests = global_props.host_linux_version != "6.1"
+        self.time_api_requests = True
 
         # Initalize memory monitor
         self.memory_monitor = None
@@ -357,9 +357,12 @@ class Microvm:
                         "Got API call duration log entry before request entry"
                     )
 
-                if current_call.url != "/snapshot/create":
-                    exec_time = float(match.group("execution_time")) / 1000.0
+                exec_time = float(match.group("execution_time")) / 1000.0
+                print(
+                    f"{current_call.method} {current_call.url} API call took {exec_time} ms. Body: {current_call.body}"
+                )
 
+                if current_call.url != "/snapshot/create":
                     assert (
                         exec_time <= MAX_API_CALL_DURATION_MS
                     ), f"{current_call.method} {current_call.url} API call exceeded maximum duration: {exec_time} ms. Body: {current_call.body}"
