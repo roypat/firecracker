@@ -895,6 +895,7 @@ class Serial:
                 break
             if (time.time() - start) >= self.RX_TIMEOUT_S:
                 self._vm.kill()
+                print(rx_str)
                 assert False
 
         return rx_str
