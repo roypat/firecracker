@@ -456,3 +456,20 @@ def uvm_with_initrd(
     uvm = microvm_factory.build(guest_kernel_linux_5_10)
     uvm.initrd_file = fs
     yield uvm
+
+
+pvh_kernel_params = [
+    pytest.param(path, id=path.name)
+    for path in defs.ARTIFACT_DIR.rglob("vmlinux-*-pvh")
+]
+pvh_guest_kernel = pytest.fixture(guest_kernel_fxt, params=pvh_kernel_params)
+
+
+@pytest.fixture
+def uvm_pvh(microvm_factory, pvh_guest_kernel, rootfs):
+    """Create a Linux/PVH microvm"""
+    return microvm_factory.build(pvh_guest_kernel, rootfs)
+
+
+# backwards compatibility
+test_microvm_with_api = uvm_plain
