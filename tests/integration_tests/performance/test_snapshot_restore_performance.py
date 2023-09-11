@@ -3,13 +3,16 @@
 """Performance benchmark for snapshot restore."""
 
 import json
+import shutil
 import tempfile
 from functools import lru_cache
+from pathlib import Path
 
 import pytest
 
 import framework.stats as st
 import host_tools.drive as drive_tools
+from framework import utils
 from framework.stats.baseline import Provider as BaselineProvider
 from framework.stats.metadata import DictProvider as DictMetadataProvider
 from framework.utils import get_kernel_version
@@ -222,3 +225,48 @@ def test_snapshot_all_devices(microvm_factory, rootfs, guest_kernel, st_core):
     st_core.name = TEST_ID
     st_core.custom["guest_config"] = guest_config
     st_core.run_exercise()
+
+
+@pytest.mark.parametrize("nets", [1, 2, 3, 4])
+@pytest.mark.parametrize("vcpus", [5, 6, 7])
+def test_D88717569(
+    microvm_factory, rootfs, guest_kernel_linux_4_14, nets, results_dir, vcpus
+):
+    """uwdiafsl
+
+    dasdfs?"""
+    vm = microvm_factory.build(guest_kernel_linux_4_14, rootfs, monitor_memory=False)
+    vm.spawn(log_level="Info")
+    vm.basic_config(
+        vcpu_count=vcpus,
+        mem_size_mib=128,
+        rootfs_io_engine="Sync",
+    )
+
+    for _ in range(nets):
+        vm.add_net_iface()
+
+    scratch_drives = get_scratch_drives()
+    for name, diskfile in scratch_drives[:2]:
+        vm.add_drive(name, diskfile.path, io_engine="Sync")
+
+    vm.start()
+    snapshot = vm.snapshot_full()
+    vm.kill()
+
+    utils.run_cmd("apt-get update && apt-get -y install strace")
+
+    microvm = microvm_factory.build()
+    microvm.jailer.daemonize = False
+    microvm.spawn()
+    microvm.restore_from_snapshot(snapshot, resume=True)
+
+    shutil.copyfile(microvm.screen_log, results_dir / f"{nets}nets-{vcpus}vcpus.strace")
+
+    microvm.flush_metrics()
+    metrics = microvm.get_all_metrics()
+    for data_point in metrics:
+        cur_value = data_point["latencies_us"]["load_snapshot"]
+        if cur_value > 0:
+            print("Restore latency: ", cur_value / USEC_IN_MSEC)
+            break
