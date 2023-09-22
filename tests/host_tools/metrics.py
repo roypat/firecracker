@@ -99,7 +99,9 @@ def emit_raw_emf(emf_msg: dict):
     emf_endpoint = urlparse(os.environ["AWS_EMF_AGENT_ENDPOINT"])
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         print(json.dumps(emf_msg), emf_endpoint.hostname, emf_endpoint.port)
-        sock.sendto(
-            (json.dumps(emf_msg) + "\n").encode("utf-8"),
-            (emf_endpoint.hostname, emf_endpoint.port),
+        print(
+            sock.sendto(
+                (json.dumps(emf_msg) + "\n").encode("utf-8"),
+                (emf_endpoint.hostname, emf_endpoint.port),
+            )
         )
