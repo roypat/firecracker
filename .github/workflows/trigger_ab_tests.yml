@@ -17,6 +17,6 @@ jobs:
                     "branch": "${{ toJson(github.event.ref) }}",
                     "env": {
                       "REVISION_A": "${{ github.event.before }}",
-                      "REVISION_B": "${{ github.event.after }}",
-                    },
+                      "REVISION_B": "${{ github.event.after }}"
+                    }
                   }'
