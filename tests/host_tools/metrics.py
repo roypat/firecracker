@@ -99,7 +99,9 @@ def emit_raw_emf(emf_msg: dict):
     if "AWS_EMF_AGENT_ENDPOINT" not in os.environ:
         return
 
-    emf_msg["_aws"]["LogGroupName"] = os.environ["AWS_EMF_NAMESPACE"]
+    emf_msg["_aws"]["LogGroupName"] = os.environ.get(
+        "AWS_EMF_LOG_GROUP_NAME", f"{os.environ['AWS_EMF_NAMESPACE']}-metrics"
+    )
     emf_msg["_aws"]["LogStreamName"] = ""
 
     emf_endpoint = urlparse(os.environ["AWS_EMF_AGENT_ENDPOINT"])
