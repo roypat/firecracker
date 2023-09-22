@@ -14,9 +14,9 @@ jobs:
                -H 'Authorization: Bearer ${{ secrets.BUILDKITE_TOKEN }}' \
                -d '{
                     "commit": "HEAD",
-                    "branch": ${{ github.event.push.ref }},
+                    "branch": "${{ github.event.push.ref }}",
                     "env": {
-                      "REVISION_A": ${{ github.event.push.before }},
-                      "REVISION_B": ${{ github.event.push.after }},
+                      "REVISION_A": "${{ github.event.push.before }}",
+                      "REVISION_B": "${{ github.event.push.after }}",
                     },
                   }'
