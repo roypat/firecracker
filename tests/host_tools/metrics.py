@@ -96,9 +96,6 @@ def get_metrics_logger():
 
 def emit_raw_emf(emf_msg: dict):
     """Emites a raw EMF log message to the local cloudwatch agent"""
-    if "AWS_EMF_AGENT_ENDPOINT" not in os.environ:
-        return
-
     emf_endpoint = urlparse(os.environ["AWS_EMF_AGENT_ENDPOINT"])
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.sendto(
