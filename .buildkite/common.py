@@ -65,14 +65,18 @@ def group(label, command, instances, platforms, **kwargs):
     label1 = label[0]
     steps = []
     commands = command
-    if isinstance(command, str):
+    if not isinstance(command, list):
         commands = [command]
     for instance in instances:
         for os, kv in platforms:
             # fill any templated variables
             args = {"instance": instance, "os": os, "kv": kv}
+            command = [
+                cmd.format(**args) if isinstance(cmd, str) else cmd(**args)
+                for cmd in commands
+            ]
             step = {
-                "command": [cmd.format(**args) for cmd in commands],
+                "command": command,
                 "label": f"{label1} {instance} {os} {kv}",
                 "agents": args,
             }
