@@ -238,9 +238,10 @@ def ab_performance_test(a_revision, b_revision, test, p_thresh, strength_thresh)
 
         values_a = processed_emf_a[dimension_set][metric][0]
 
-        if result.pvalue < p_thresh and abs(result.statistic) > abs(
-            statistics.mean(values_a)
-        ) * (strength_thresh):
+        if (
+            result.pvalue < p_thresh
+            and abs(result.statistic) > abs(statistics.mean(values_a)) * strength_thresh
+        ):
             failures.append((dimension_set, metric, result, unit))
 
     failure_report = "\n".join(
@@ -279,11 +280,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--significance",
         help="The p-value threshold that needs to be crossed for a test result to be considered significant",
+        type=float,
         default=0.01,
     )
     parser.add_argument(
         "--relative-strength",
         help="The minimal delta required before a regression will be considered valid",
+        type=float,
         default=0.2,
     )
     args = parser.parse_args()

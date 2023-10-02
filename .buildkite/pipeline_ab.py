@@ -35,7 +35,7 @@ perf_test = {
     },
     "snapshot-latency": {
         "label": "📸 Snapshot Latency",
-        "test_path": "integration_tests/performance/test_snapshot_ab.py",
+        "test_path": "integration_tests/performance/test_snapshot_ab.py --relative-strength 0.35",
         "devtool_opts": "-c 1-12 -m 0",
         "timeout_in_minutes": 60,
     },
