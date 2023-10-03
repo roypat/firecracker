@@ -214,7 +214,9 @@ def analyze_data(processed_emf_a, processed_emf_b, *, n_resamples: int = 9999):
     return results
 
 
-def ab_performance_test(a_revision, b_revision, test, p_thresh, strength_thresh):
+def ab_performance_test(
+    a_revision, b_revision, test, p_thresh, strength_thresh, noise_threshold
+):
     """Does an A/B-test of the specified test across the given revisions"""
     _, commit_list, _ = utils.run_cmd(
         f"git --no-pager log --oneline {a_revision}..{b_revision}"
@@ -231,18 +233,27 @@ def ab_performance_test(a_revision, b_revision, test, p_thresh, strength_thresh)
         b_revision=b_revision,
     )
 
+    relative_changes_by_metric = {}
+
     failures = []
     for (dimension_set, metric), (result, unit) in results.items():
         if is_ignored(dict(dimension_set)):
             continue
 
         values_a = processed_emf_a[dimension_set][metric][0]
+        baseline_mean = statistics.mean(values_a)
+
+        if metric not in relative_changes_by_metric:
+            relative_changes_by_metric[metric] = []
+        relative_changes_by_metric[metric].append(result.statistic / baseline_mean)
 
         if (
             result.pvalue < p_thresh
-            and abs(result.statistic) > abs(statistics.mean(values_a)) * strength_thresh
+            and abs(result.statistic) > baseline_mean * strength_thresh
         ):
             failures.append((dimension_set, metric, result, unit))
+
+    print(relative_changes_by_metric)
 
     failure_report = "\n".join(
         f"\033[0;32m[Firecracker A/B-Test Runner]\033[0m A/B-testing shows a change of "
@@ -254,8 +265,9 @@ def ab_performance_test(a_revision, b_revision, test, p_thresh, strength_thresh)
         f"characteristics did not change across the tested commits, has a probability of {result.pvalue:.2%}. "
         f"Tested Dimensions:\n{json.dumps(dict(dimension_set), indent=2)}"
         for (dimension_set, metric, result, unit) in failures
+        if abs(statistics.mean(relative_changes_by_metric[metric])) > noise_threshold
     )
-    assert not failures, "\n" + failure_report
+    assert not failure_report, "\n" + failure_report
     print("No regressions detected!")
 
 
@@ -287,8 +299,9 @@ if __name__ == "__main__":
         "--relative-strength",
         help="The minimal delta required before a regression will be considered valid",
         type=float,
-        default=0.2,
+        default=0.0,
     )
+    parser.add_argument("--noise-threshold", help="", type=float, default=0.05)
     args = parser.parse_args()
 
     ab_performance_test(
@@ -298,4 +311,5 @@ if __name__ == "__main__":
         args.test,
         args.significance,
         args.relative_strength,
+        args.noise_threshold,
     )
