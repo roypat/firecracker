@@ -35,7 +35,7 @@ perf_test = {
     },
     "snapshot-latency": {
         "label": "📸 Snapshot Latency",
-        "test_path": "integration_tests/performance/test_snapshot_ab.py --relative-strength 0.35",
+        "test_path": "integration_tests/performance/test_snapshot_ab.py",
         "devtool_opts": "-c 1-12 -m 0",
         "timeout_in_minutes": 60,
     },
@@ -55,9 +55,25 @@ def build_group(test):
     """Build a Buildkite pipeline `group` step"""
     devtool_opts = test.pop("devtool_opts")
     test_path = test.pop("test_path")
+
+    command_base = f"./tools/devtool -y test --ab {devtool_opts} -- {REVISION_A} {REVISION_B} --test {test_path}"
+
+    def command_supplier(instance, kv, os):
+        if (
+            instance in ["m6a.metal", "m6i.metal", "m5d.metal"]
+            and kv
+            in [
+                "linux_5.10",
+                "linux_6.1",
+            ]
+            and command_base.endswith("test_snapshot_ab.py")
+        ):
+            return command_base + " --relative-strength 0.35"
+        return command_base
+
     return group(
         label=test.pop("label"),
-        command=f"./tools/devtool -y test --ab {devtool_opts} -- {REVISION_A} {REVISION_B} --test {test_path}",
+        command=command_supplier,
         artifacts=["./test_results/*"],
         instances=test.pop("instances"),
         platforms=test.pop("platforms"),
