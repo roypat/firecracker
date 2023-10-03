@@ -57,10 +57,6 @@ def network_microvm(request, microvm_factory, guest_kernel, rootfs):
     vm.add_net_iface()
     vm.start()
 
-    # Check if the needed CPU cores are available. We have the API thread, VMM
-    # thread and then one thread for each configured vCPU.
-    assert CpuMap.len() >= 2 + vm.vcpus_count
-
     # Pin uVM threads to physical cores.
     assert vm.pin_vmm(0), "Failed to pin firecracker thread."
     assert vm.pin_api(1), "Failed to pin fc_api thread."

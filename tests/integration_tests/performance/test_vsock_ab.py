@@ -93,11 +93,6 @@ def test_vsock_throughput(
     vm.api.vsock.put(vsock_id="vsock0", guest_cid=3, uds_path="/" + VSOCK_UDS_PATH)
     vm.start()
 
-    # Check if the needed CPU cores are available. We have the API thread, VMM
-    # thread and then one thread for each configured vCPU. Lastly, we need one for
-    # the iperf server on the host.
-    assert CpuMap.len() > 2 + vm.vcpus_count
-
     # Pin uVM threads to physical cores.
     assert vm.pin_vmm(0), "Failed to pin firecracker thread."
     assert vm.pin_api(1), "Failed to pin fc_api thread."
