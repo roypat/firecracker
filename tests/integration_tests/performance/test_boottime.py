@@ -3,10 +3,12 @@
 """Tests that ensure the boot time to init process is within spec."""
 
 import re
+import shutil
 import time
 
 import pytest
 
+from framework import utils
 from framework.properties import global_props
 
 # The maximum acceptable boot time in us.
@@ -83,14 +85,19 @@ def test_boottime_with_network(fast_microvm, record_property, metrics):
     """Check boot time of microVM with a network device."""
     vm = fast_microvm
     vm.jailer.extra_args.update({"boot-timer": None})
+    vm.jailer.daemonize = False
+    utils.run_cmd("apt-get update && apt-get install -y strace")
     _configure_and_run_vm(vm, network=True)
     boottime_us = _get_microvm_boottime(vm)
+    # print(Path(vm.screen_log).read_text("UTF-8"))
     print(f"Boot time with network configured is: {boottime_us} us")
     record_property(
         "boottime_with_network", f"{boottime_us} us < {MAX_BOOT_TIME_US} us"
     )
     metrics.set_dimensions(DIMENSIONS)
     metrics.put_metric("boot_time_with_net", boottime_us, unit="Microseconds")
+
+    shutil.copy(vm.screen_log, "/firecracker/test_results")
 
     if (
         global_props.cpu_codename == "INTEL_ICELAKE"
@@ -151,6 +158,9 @@ def _configure_and_run_vm(microvm, network=False, initrd=False):
     if network:
         microvm.add_net_iface()
     microvm.start()
+    microvm.pin_vmm(0)
+    microvm.pin_api(1)
+    microvm.pin_vcpu(0, 2)
 
 
 @pytest.mark.parametrize(
