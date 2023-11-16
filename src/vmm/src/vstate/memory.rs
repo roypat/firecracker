@@ -8,6 +8,8 @@
 use std::fs::File;
 use std::io::SeekFrom;
 
+use crate::cpu_config::templates::KvmCapability;
+use kvm_bindings::KVMIO;
 use utils::{errno, get_page_size, u64_to_usize};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -19,8 +21,11 @@ pub use vm_memory::{
     GuestUsize, MemoryRegionAddress, MmapRegion,
 };
 use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
+use vmm_sys_util::ioctl::ioctl_with_ref;
+use vmm_sys_util::syscall::SyscallReturnCode;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr, ioctl_iowr_nr};
 
-use crate::DirtyBitmap;
+use crate::{DirtyBitmap, Vm};
 
 /// Type of GuestMemoryMmap.
 pub type GuestMemoryMmap = vm_memory::GuestMemoryMmap<Option<AtomicBitmap>>;

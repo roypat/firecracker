@@ -23,10 +23,11 @@ use userfaultfd::Uffd;
 use utils::eventfd::EventFd;
 use utils::time::TimestampUs;
 use utils::u64_to_usize;
-use vm_memory::ReadVolatile;
+use vm_memory::{Address, GuestMemoryRegion, ReadVolatile};
 #[cfg(target_arch = "aarch64")]
 use vm_superio::Rtc;
 use vm_superio::Serial;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr};
 
 use crate::arch::InitrdConfig;
 #[cfg(target_arch = "aarch64")]
@@ -61,8 +62,10 @@ use crate::vstate::memory::{
     create_memfd, GuestAddress, GuestMemory, GuestMemoryExtension, GuestMemoryMmap,
 };
 use crate::vstate::vcpu::{Vcpu, VcpuConfig};
-use crate::vstate::vm::Vm;
+use crate::vstate::vm::{Vm, VmError};
 use crate::{device_manager, EventManager, RestoreVcpusError, Vmm, VmmError};
+use kvm_bindings::KVMIO;
+use vmm_sys_util::ioctl::ioctl_with_ref;
 
 /// Errors associated with starting the instance.
 #[derive(Debug, thiserror::Error)]
@@ -248,6 +251,25 @@ fn create_vmm_and_vcpus(
     Ok((vmm, vcpus))
 }
 
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct kvm_memory_attributes {
+    address: u64,
+    size: u64,
+    attributes: u64,
+    flags: u64,
+}
+
+ioctl_iow_nr!(
+    KVM_SET_MEMORY_ATTRIBUTES,
+    KVMIO,
+    0xd2,
+    kvm_memory_attributes
+);
+
+const KVM_MEMORY_ATTRIBUTE_PRIVATE: u64 = 1u64 << 3;
+
 /// Builds and starts a microVM based on the current Firecracker VmResources configuration.
 ///
 /// The built microVM and all the created vCPUs start off in the paused state.
@@ -281,6 +303,15 @@ pub fn build_microvm_for_boot(
 
     let cpu_template = vm_resources.vm_config.cpu_template.get_cpu_template()?;
 
+    const KVM_CAP_MEMORY_ATTRIBUTES: u32 = 232;
+    const KVM_CAP_GUEST_MEMFD: u32 = 233;
+    const KVM_CAP_VM_TYPES: u32 = 234;
+
+    let mut capabilities = cpu_template.kvm_capabilities.clone();
+    capabilities.push(KvmCapability::Add(KVM_CAP_MEMORY_ATTRIBUTES));
+    capabilities.push(KvmCapability::Add(KVM_CAP_GUEST_MEMFD));
+    capabilities.push(KvmCapability::Add(KVM_CAP_VM_TYPES));
+
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
@@ -288,7 +319,7 @@ pub fn build_microvm_for_boot(
         None,
         track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
-        cpu_template.kvm_capabilities.clone(),
+        capabilities,
     )?;
 
     // The boot timer device needs to be the first device attached in order
@@ -335,6 +366,29 @@ pub fn build_microvm_for_boot(
         &initrd,
         boot_cmdline,
     )?;
+
+    for thingy in vmm.guest_memory.iter() {
+        let attrs = kvm_memory_attributes {
+            address: thingy.start_addr().raw_value(),
+            size: thingy.len(),
+            attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE,
+            flags: 0,
+        };
+
+        unsafe {
+            vmm_sys_util::syscall::SyscallReturnCode(ioctl_with_ref(
+                vmm.vm.fd(),
+                KVM_SET_MEMORY_ATTRIBUTES(),
+                &attrs,
+            ))
+            .into_result()
+            .map_err(|err| {
+                Internal(VmmError::Vm(VmError::SetUserMemoryRegion(
+                    kvm_ioctls::Error::new(err.raw_os_error().unwrap()),
+                )))
+            })?;
+        }
+    }
 
     // Move vcpus to their own threads and start their state machine in the 'Paused' state.
     vmm.start_vcpus(

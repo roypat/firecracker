@@ -8,6 +8,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 
+use kvm_bindings::KVMIO;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, CpuId, MsrList,
@@ -16,10 +17,14 @@ use kvm_bindings::{
 };
 use kvm_bindings::{kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES};
 use kvm_ioctls::{Kvm, VmFd};
+use libc::ioctl;
 #[cfg(target_arch = "x86_64")]
 use utils::u64_to_usize;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
+use vmm_sys_util::ioctl::ioctl_with_ref;
+use vmm_sys_util::syscall::SyscallReturnCode;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr, ioctl_iowr_nr};
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::GICDevice;
@@ -27,6 +32,80 @@ use crate::arch::aarch64::gic::GICDevice;
 use crate::arch::aarch64::gic::GicState;
 use crate::cpu_config::templates::KvmCapability;
 use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+
+const KVM_CAP_MEMORY_ATTRIBUTES: u32 = 232;
+const KVM_CAP_GUEST_MEMFD: u32 = 234;
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct kvm_create_guest_memfd {
+    size: u64,
+    flags: u64,
+    reserved: [u64; 6],
+}
+
+ioctl_iowr_nr!(KVM_CREATE_GUEST_MEMFD, KVMIO, 0xd4, kvm_create_guest_memfd);
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct kvm_userspace_memory_region2 {
+    slot: u32,
+    flags: u32,
+    guest_phys_addr: u64,
+    memory_size: u64,
+    userspace_addr: u64,
+    guest_memfd_offset: u64,
+    guest_memfd: u32,
+    pad1: u32,
+    pad2: [u64; 14],
+}
+
+ioctl_iow_nr!(
+    KVM_SET_USER_MEMORY_REGION2,
+    KVMIO,
+    0x49,
+    kvm_userspace_memory_region2
+);
+
+#[test]
+fn test_guest_memfd_read_write() {
+    let mut vm = Vm::new(vec![
+        KvmCapability::Add(KVM_CAP_GUEST_MEMFD),
+        KvmCapability::Add(KVM_CAP_MEMORY_ATTRIBUTES),
+    ])
+    .unwrap();
+    let fd = SyscallReturnCode(unsafe {
+        ioctl_with_ref(
+            vm.fd(),
+            KVM_CREATE_GUEST_MEMFD(),
+            &kvm_create_guest_memfd {
+                size: 128 * 1024 * 1024, // 128MB
+                flags: 0,
+                ..Default::default()
+            },
+        )
+    })
+    .into_result()
+    .unwrap();
+
+    let buf = vec![42u8; 10];
+
+    unsafe {
+        assert_eq!(
+            SyscallReturnCode(libc::write(fd, buf.as_ptr() as _, 10)).into_result().unwrap(),
+            10
+        );
+    }
+
+    let mut buf2 = vec![0u8; 10];
+    unsafe {
+        assert_eq!(libc::read(fd, buf2.as_mut_ptr() as _, 10), 10);
+    }
+
+    assert_eq!(buf, buf2);
+}
 
 /// Errors associated with the wrappers over KVM ioctls.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -154,6 +233,8 @@ pub struct Vm {
     irqchip_handle: Option<GICDevice>,
 }
 
+const KVM_X86_SW_PROTECTED_VM: u64 = 1;
+
 /// Contains Vm functions that are usable across CPU architectures
 impl Vm {
     /// Constructs a new `Vm` using the given `Kvm` instance.
@@ -173,7 +254,9 @@ impl Vm {
 
         let max_memslots = kvm.get_nr_memslots();
         // Create fd for interacting with kvm-vm specific functions.
-        let vm_fd = kvm.create_vm().map_err(VmError::VmFd)?;
+        let vm_fd = kvm
+            .create_vm_with_type(KVM_X86_SW_PROTECTED_VM)
+            .map_err(VmError::VmFd)?;
 
         #[cfg(target_arch = "aarch64")]
         {
@@ -262,19 +345,38 @@ impl Vm {
             .iter()
             .enumerate()
             .try_for_each(|(index, region)| {
-                let memory_region = kvm_userspace_memory_region {
-                    slot: u32::try_from(index).unwrap(),
+                let fd = SyscallReturnCode(unsafe {
+                    ioctl_with_ref(
+                        self.fd(),
+                        KVM_CREATE_GUEST_MEMFD(),
+                        &kvm_create_guest_memfd {
+                            size: region.len(),
+                            flags: 0,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .into_result()?;
+
+                let memory_region = kvm_userspace_memory_region2 {
+                    slot: index as u32,
+                    flags: 0,
                     guest_phys_addr: region.start_addr().raw_value(),
                     memory_size: region.len(),
-                    // It's safe to unwrap because the guest address is valid.
                     userspace_addr: guest_mem.get_host_address(region.start_addr()).unwrap() as u64,
-                    flags,
+                    guest_memfd_offset: 0,
+                    guest_memfd: fd as u32,
+                    ..Default::default()
                 };
 
-                // SAFETY: Safe because the fd is a valid KVM file descriptor.
-                unsafe { self.fd.set_user_memory_region(memory_region) }
+                SyscallReturnCode(unsafe {
+                    ioctl_with_ref(self.fd(), KVM_SET_USER_MEMORY_REGION2(), &memory_region)
+                })
+                .into_empty_result()
             })
-            .map_err(VmError::SetUserMemoryRegion)?;
+            .map_err(|ioe| {
+                VmError::SetUserMemoryRegion(kvm_ioctls::Error::new(ioe.raw_os_error().unwrap()))
+            })?;
         Ok(())
     }
 
