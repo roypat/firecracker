@@ -28,7 +28,7 @@ utils = { path = "../utils" }
 vmm = { path = "../vmm" }
 
 [dev-dependencies]
-cargo_toml = "0.17.0"
+cargo_toml = "0.17.1"
 regex = { version = "1.10.2", default-features = false, features = ["std", "unicode-perl"] }
 
 # Dev-Dependencies for uffd examples
