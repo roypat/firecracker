@@ -33,7 +33,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 import host_tools.cargo_build as build_tools
 import host_tools.network as net_tools
 from framework import utils
-from framework.artifacts import NetIfaceConfig
 from framework.defs import MAX_API_CALL_DURATION_MS
 from framework.http_api import Api
 from framework.jailer import JailerContext
@@ -102,7 +101,7 @@ class Snapshot:
         return cls(
             vmstate=src / obj["vmstate"],
             mem=src / obj["mem"],
-            net_ifaces=[NetIfaceConfig(**d) for d in obj["net_ifaces"]],
+            net_ifaces=[net_tools.NetIfaceConfig(**d) for d in obj["net_ifaces"]],
             disks={dsk: src / p for dsk, p in obj["disks"].items()},
             ssh_key=src / obj["ssh_key"],
             snapshot_type=SnapshotType(obj["snapshot_type"]),
@@ -151,11 +150,13 @@ class Microvm:
 
     def __init__(
         self,
-        resource_path: Path,
         microvm_id: str,
         fc_binary_path: Path,
         jailer_binary_path: Path,
+        netns: net_tools.NetNs,
         monitor_memory: bool = True,
+        jailer_kwargs: Optional[dict] = None,
+        numa_node=None,
     ):
         """Set up microVM attributes, paths, and data structures."""
         # pylint: disable=too-many-statements
@@ -163,9 +164,6 @@ class Microvm:
         assert microvm_id is not None
         self._microvm_id = microvm_id
 
-        # Compose the paths to the resources specific to this microvm.
-        self._path = resource_path / microvm_id
-        self._path.mkdir(parents=True, exist_ok=True)
         self.kernel_file = None
         self.rootfs_file = None
         self.ssh_key = None
@@ -177,11 +175,15 @@ class Microvm:
         self._jailer_binary_path = Path(jailer_binary_path)
         assert jailer_binary_path.exists()
 
+        jailer_kwargs = jailer_kwargs or {}
+        self.netns = netns
         # Create the jailer context associated with this microvm.
         self.jailer = JailerContext(
             jailer_id=self._microvm_id,
             exec_file=self._fc_binary_path,
+            netns=netns,
             new_pid_ns=True,
+            **jailer_kwargs,
         )
 
         # Copy the /etc/localtime file in the jailer root
@@ -209,6 +211,8 @@ class Microvm:
         self.disks = {}
         self.vcpus_count = None
         self.mem_size_bytes = None
+
+        self._numa_node = numa_node
 
         # Flag checked in destructor to see abnormal signal-induced crashes.
         self.expect_kill_by_signal = False
@@ -319,7 +323,7 @@ class Microvm:
     @property
     def path(self):
         """Return the path on disk used that represents this microVM."""
-        return self._path
+        return self.jailer.chroot_base_with_id()
 
     # some functions use this
     fsfiles = path
@@ -456,6 +460,24 @@ class Microvm:
             return True
         return False
 
+    def pin_threads(self, first_cpu):
+        """
+        Pins all microvm threads (VMM, API and vCPUs) to consecutive physical cpu core, starting with "first_cpu"
+        """
+        for vcpu, pcpu in enumerate(range(first_cpu, first_cpu + self.vcpus_count)):
+            assert self.pin_vcpu(
+                vcpu, pcpu
+            ), f"Failed to pin fc_vcpu {vcpu} thread to core {pcpu}."
+        # The cores first_cpu,...,first_cpu + self.vcpus_count - 1 are assigned to the individual vCPU threads,
+        # So the remaining two threads (VMM and API) get first_cpu + self.vcpus_count
+        # and first_cpu + self.vcpus_count + 1
+        assert self.pin_vmm(
+            first_cpu + self.vcpus_count
+        ), "Failed to pin firecracker thread."
+        assert self.pin_api(
+            first_cpu + self.vcpus_count + 1
+        ), "Failed to pin fc_api thread."
+
     def spawn(
         self,
         log_file="fc.log",
@@ -466,6 +488,7 @@ class Microvm:
     ):
         """Start a microVM as a daemon or in a screen session."""
         # pylint: disable=subprocess-run-check
+        # pylint: disable=too-many-branches
         self.jailer.setup()
         self.api = Api(self.jailer.api_socket_path())
 
@@ -500,11 +523,19 @@ class Microvm:
             # Checking the timings requires DEBUG level log messages
             self.time_api_requests = False
 
+        if not self.jailer.daemonize:
+            self.jailer.new_pid_ns = False
+
+        cmd = [str(self._jailer_binary_path)] + self.jailer.construct_param_list()
+        if self._numa_node is not None:
+            node = str(self._numa_node)
+            cmd = ["numactl", "-N", node, "-m", node] + cmd
+
         # When the daemonize flag is on, we want to clone-exec into the
         # jailer rather than executing it via spawning a shell.
         if self.jailer.daemonize:
             res = subprocess.Popen(
-                [str(self._jailer_binary_path)] + self.jailer.construct_param_list(),
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
@@ -515,12 +546,11 @@ class Microvm:
             # Run Firecracker under screen. This is used when we want to access
             # the serial console. The file will collect the output from
             # 'screen'ed Firecracker.
-            self.jailer.new_pid_ns = False
             screen_pid, binary_pid = utils.start_screen_process(
                 self.screen_log,
                 self.screen_session,
-                self._jailer_binary_path,
-                self.jailer.construct_param_list(),
+                cmd[0],
+                cmd[1:],
             )
             self._screen_pid = screen_pid
             self._screen_firecracker_pid = binary_pid
@@ -548,6 +578,18 @@ class Microvm:
         assert (
             message in self.log_data
         ), f'Message ("{message}") not found in log data ("{self.log_data}").'
+
+    @retry(wait=wait_fixed(0.2), stop=stop_after_attempt(5), reraise=True)
+    def get_exit_code(self):
+        """Get exit code from logging output"""
+        exit_msg_pattern = (
+            r"Firecracker exiting (with error|successfully). exit_code=(\d+)"
+        )
+        match = re.search(exit_msg_pattern, self.log_data)
+        if match:
+            exit_code = int(match.group(2))
+            return exit_code
+        raise AssertionError(f"unable to find exit code from the log: {self.log_data}")
 
     @retry(wait=wait_fixed(0.2), stop=stop_after_attempt(5), reraise=True)
     def check_any_log_message(self, messages):
@@ -674,21 +716,22 @@ class Microvm:
             cache_type=cache_type,
         )
 
-    def patch_drive(self, drive_id, file):
+    def patch_drive(self, drive_id, file=None):
         """Modify/patch an existing block device."""
-        self.api.drive.patch(
-            drive_id=drive_id,
-            path_on_host=self.create_jailed_resource(file.path),
-        )
-        self.disks[drive_id] = Path(file.path)
+        if file:
+            self.api.drive.patch(
+                drive_id=drive_id,
+                path_on_host=self.create_jailed_resource(file.path),
+            )
+            self.disks[drive_id] = Path(file.path)
+        else:
+            self.api.drive.patch(drive_id=drive_id)
 
     def add_net_iface(self, iface=None, api=True, **kwargs):
         """Add a network interface"""
         if iface is None:
-            iface = NetIfaceConfig.with_id(len(self.iface))
-        tap = net_tools.Tap(
-            iface.tap_name, self.jailer.netns, ip=f"{iface.host_ip}/{iface.netmask}"
-        )
+            iface = net_tools.NetIfaceConfig.with_id(len(self.iface))
+        tap = self.netns.add_tap(iface.tap_name, ip=f"{iface.host_ip}/{iface.netmask}")
         self.iface[iface.dev_name] = {
             "iface": iface,
             "tap": tap,
@@ -810,7 +853,7 @@ class Microvm:
         guest_ip = list(self.iface.values())[iface_idx]["iface"].guest_ip
         self.ssh_key = Path(self.ssh_key)
         return net_tools.SSHConnection(
-            netns=self.jailer.netns,
+            netns=self.netns.id,
             ssh_key=self.ssh_key,
             user="root",
             host=guest_ip,
@@ -825,23 +868,26 @@ class Microvm:
 class MicroVMFactory:
     """MicroVM factory"""
 
-    def __init__(self, base_path: Path, fc_binary_path: Path, jailer_binary_path: Path):
-        self.base_path = Path(base_path)
+    def __init__(self, fc_binary_path: Path, jailer_binary_path: Path, **kwargs):
         self.vms = []
         self.fc_binary_path = Path(fc_binary_path)
         self.jailer_binary_path = Path(jailer_binary_path)
+        self.kwargs = kwargs
 
     def build(self, kernel=None, rootfs=None, **kwargs):
         """Build a microvm"""
+        kwargs = self.kwargs | kwargs
+        microvm_id = kwargs.pop("microvm_id", str(uuid.uuid4()))
         vm = Microvm(
-            resource_path=self.base_path,
-            microvm_id=kwargs.pop("microvm_id", str(uuid.uuid4())),
+            microvm_id=microvm_id,
             fc_binary_path=kwargs.pop("fc_binary_path", self.fc_binary_path),
             jailer_binary_path=kwargs.pop(
                 "jailer_binary_path", self.jailer_binary_path
             ),
+            netns=kwargs.pop("netns", net_tools.NetNs(microvm_id)),
             **kwargs,
         )
+        vm.netns.setup()
         self.vms.append(vm)
         if kernel is not None:
             vm.kernel_file = kernel
@@ -863,6 +909,7 @@ class MicroVMFactory:
             vm.jailer.cleanup()
             if len(vm.jailer.jailer_id) > 0:
                 shutil.rmtree(vm.jailer.chroot_base_with_id())
+            vm.netns.cleanup()
 
 
 class Serial:

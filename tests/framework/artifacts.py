@@ -11,7 +11,6 @@ from typing import Iterator
 import packaging.version
 import pytest
 
-import host_tools.network as net_tools
 from framework.defs import ARTIFACT_DIR
 from framework.properties import global_props
 from framework.utils import get_firecracker_version_from_toml
@@ -25,7 +24,7 @@ def select_supported_kernels():
     hlv = packaging.version.parse(global_props.host_linux_version)
     supported_kernels = [r"vmlinux-4.14.\d+"]
     if (
-        global_props.instance == "c7g.metal"
+        global_props.cpu_model == "ARM_NEOVERSE_V1"
         and global_props.host_linux_version == "4.14"
     ):
         supported_kernels.append(r"vmlinux-5.10-no-sve.bin")
@@ -33,7 +32,7 @@ def select_supported_kernels():
         supported_kernels.append(r"vmlinux-5.10.\d+")
 
     # Support Linux 6.1 guest in a limited fashion
-    if global_props.instance == "c7g.metal" and (hlv.major, hlv.minor) >= (6, 1):
+    if global_props.cpu_model == "ARM_NEOVERSE_V1" and (hlv.major, hlv.minor) >= (6, 1):
         supported_kernels.append(r"vmlinux-6.1.\d+")
 
     return supported_kernels
@@ -151,29 +150,3 @@ def firecracker_artifacts():
 
     fc = working_version_as_artifact()
     yield pytest.param(fc, id=fc.name)
-
-
-@dataclass(frozen=True, repr=True)
-class NetIfaceConfig:
-    """Defines a network interface configuration."""
-
-    host_ip: str = "192.168.0.1"
-    guest_ip: str = "192.168.0.2"
-    tap_name: str = "tap0"
-    dev_name: str = "eth0"
-    netmask: int = 30
-
-    @property
-    def guest_mac(self):
-        """Return the guest MAC address."""
-        return net_tools.mac_from_ip(self.guest_ip)
-
-    @staticmethod
-    def with_id(i):
-        """Define network iface with id `i`."""
-        return NetIfaceConfig(
-            host_ip=f"192.168.{i}.1",
-            guest_ip=f"192.168.{i}.2",
-            tap_name=f"tap{i}",
-            dev_name=f"eth{i}",
-        )

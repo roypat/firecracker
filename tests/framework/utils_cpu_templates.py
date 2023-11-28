@@ -26,8 +26,8 @@ def get_supported_cpu_templates():
     match cpuid_utils.get_cpu_vendor():
         case cpuid_utils.CpuVendor.INTEL:
             # T2CL template is only supported on Cascade Lake and newer CPUs.
-            skylake_model = "Intel(R) Xeon(R) Platinum 8175M CPU @ 2.50GHz"
-            if global_props.cpu_model == skylake_model:
+
+            if global_props.cpu_codename == cpuid_utils.CpuModel.INTEL_SKYLAKE:
                 return sorted(set(INTEL_TEMPLATES) - set(["T2CL"]))
             return INTEL_TEMPLATES
         case cpuid_utils.CpuVendor.AMD:
@@ -44,11 +44,11 @@ def get_supported_cpu_templates():
 SUPPORTED_CPU_TEMPLATES = get_supported_cpu_templates()
 
 # Custom CPU templates for Aarch64 for testing
-AARCH64_CUSTOM_CPU_TEMPLATES_G2 = ["aarch64_remove_ssbs", "aarch64_v1n1"]
+AARCH64_CUSTOM_CPU_TEMPLATES_G2 = ["aarch64_remove_ssbs", "v1n1"]
 AARCH64_CUSTOM_CPU_TEMPLATES_G3 = [
     "aarch64_remove_ssbs",
     "aarch64_with_sve_and_pac",
-    "aarch64_v1n1",
+    "v1n1",
 ]
 
 

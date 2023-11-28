@@ -59,11 +59,10 @@ def _configure_network_interface(test_microvm):
     """
     Create tap interface before spawning the microVM.
 
-    The network namespace and tap interface have to be created
-    beforehand when starting the microVM from a config file.
+    The network namespace is already pre-created.
+    The tap interface has to be created beforehand when starting the microVM
+    from a config file.
     """
-    # Create network namespace.
-    utils.run_cmd(f"ip netns add {test_microvm.jailer.netns}")
 
     # Create tap device, and avoid creating it in the guest since it is already
     # specified in the JSON
@@ -169,8 +168,9 @@ def test_config_start_no_api_exit(uvm_plain, vm_config_file):
     test_microvm.ssh.run("reboot")  # Exit
     time.sleep(3)  # Wait for shutdown
 
-    # Check error log
-    test_microvm.check_log_message("Firecracker exited successfully")
+    # Check error log and exit code
+    test_microvm.check_log_message("Firecracker exiting successfully")
+    assert test_microvm.get_exit_code() == 0
 
 
 @pytest.mark.parametrize(

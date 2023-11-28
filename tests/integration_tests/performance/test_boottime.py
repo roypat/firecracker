@@ -68,13 +68,6 @@ def test_boottime_no_network(fast_microvm, record_property, metrics):
     record_property("boottime_no_network", f"{boottime_us} us < {MAX_BOOT_TIME_US} us")
     metrics.set_dimensions(DIMENSIONS)
     metrics.put_metric("boot_time", boottime_us, unit="Microseconds")
-
-    if (
-        global_props.cpu_codename == "INTEL_ICELAKE"
-        and global_props.host_linux_version == "6.1"
-    ):
-        pytest.skip("perf regression under investigation")
-
     assert (
         boottime_us < MAX_BOOT_TIME_US
     ), f"boot time {boottime_us} cannot be greater than: {MAX_BOOT_TIME_US} us"
@@ -92,13 +85,6 @@ def test_boottime_with_network(fast_microvm, record_property, metrics):
     )
     metrics.set_dimensions(DIMENSIONS)
     metrics.put_metric("boot_time_with_net", boottime_us, unit="Microseconds")
-
-    if (
-        global_props.cpu_codename == "INTEL_ICELAKE"
-        and global_props.host_linux_version == "6.1"
-    ):
-        pytest.skip("perf regression under investigation")
-
     assert (
         boottime_us < MAX_BOOT_TIME_US
     ), f"boot time {boottime_us} cannot be greater than: {MAX_BOOT_TIME_US} us"
@@ -152,6 +138,7 @@ def _configure_and_run_vm(microvm, network=False, initrd=False):
     if network:
         microvm.add_net_iface()
     microvm.start()
+    microvm.pin_threads(0)
 
 
 def find_events(log_data):
@@ -202,6 +189,7 @@ def test_boottime(
         )
         vm.add_net_iface()
         vm.start()
+        vm.pin_threads(0)
         boottime_us = _get_microvm_boottime(vm)
         metrics.put_metric("boot_time", boottime_us, unit="Microseconds")
         timestamps = find_events(vm.log_data)

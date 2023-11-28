@@ -8,7 +8,7 @@
 //! Virtual Machine Monitor that leverages the Linux Kernel-based Virtual Machine (KVM),
 //! and other virtualization features to run a single lightweight micro-virtual
 //! machine (microVM).
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 
@@ -109,10 +109,11 @@ pub mod vstate;
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::io::AsRawFd;
-use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
+use devices::virtio::vhost_user_block::device::VhostUserBlock;
 use event_manager::{EventManager as BaseEventManager, EventOps, Events, MutEventSubscriber};
 use seccompiler::BpfProgram;
 use snapshot::Persist;
@@ -655,6 +656,15 @@ impl Vmm {
             .map_err(VmmError::DeviceManager)
     }
 
+    /// Updates the rate limiter parameters for block device with `drive_id` id.
+    pub fn update_vhost_user_block_config(&mut self, drive_id: &str) -> Result<(), VmmError> {
+        self.mmio_device_manager
+            .with_virtio_device_with_id(TYPE_BLOCK, drive_id, |block: &mut VhostUserBlock| {
+                block.config_update().map_err(|err| format!("{:?}", err))
+            })
+            .map_err(VmmError::DeviceManager)
+    }
+
     /// Updates the rate limiter parameters for net device with `net_id` id.
     pub fn update_net_rate_limiters(
         &mut self,
@@ -905,23 +915,27 @@ impl MutEventSubscriber for Vmm {
             // Exit event handling should never do anything more than call 'self.stop()'.
             let _ = self.vcpus_exit_evt.read();
 
-            let mut exit_code = None;
-            // Query each vcpu for their exit_code.
-            for handle in &self.vcpus_handles {
-                match handle.response_receiver().try_recv() {
-                    Ok(VcpuResponse::Exited(status)) => {
-                        exit_code = Some(status);
-                        // Just use the first encountered exit-code.
-                        break;
-                    }
-                    Ok(_response) => {} // Don't care about these, we are exiting.
-                    Err(TryRecvError::Empty) => {} // Nothing pending in channel
-                    Err(err) => {
-                        panic!("Error while looking for VCPU exit status: {}", err);
+            let exit_code = 'exit_code: {
+                // Query each vcpu for their exit_code.
+                for handle in &self.vcpus_handles {
+                    // Drain all vcpu responses that are pending from this vcpu until we find an
+                    // exit status.
+                    for response in handle.response_receiver().try_iter() {
+                        if let VcpuResponse::Exited(status) = response {
+                            // It could be that some vcpus exited successfully while others
+                            // errored out. Thus make sure that error exits from one vcpu always
+                            // takes precedence over "ok" exits
+                            if status != FcExitCode::Ok {
+                                break 'exit_code status;
+                            }
+                        }
                     }
                 }
-            }
-            self.stop(exit_code.unwrap_or(FcExitCode::Ok));
+
+                // No CPUs exited with error status code, report "Ok"
+                FcExitCode::Ok
+            };
+            self.stop(exit_code);
         } else {
             error!("Spurious EventManager event for handler: Vmm");
         }

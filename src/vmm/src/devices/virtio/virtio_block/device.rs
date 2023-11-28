@@ -33,9 +33,7 @@ use crate::devices::virtio::gen::virtio_blk::{
 };
 use crate::devices::virtio::gen::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use crate::devices::virtio::queue::Queue;
-use crate::devices::virtio::virtio_block::block_metrics::{
-    BlockDeviceMetrics, BlockMetricsPerDevice,
-};
+use crate::devices::virtio::virtio_block::metrics::{BlockDeviceMetrics, BlockMetricsPerDevice};
 use crate::devices::virtio::{ActivateError, TYPE_BLOCK};
 use crate::logger::{error, warn, IncMetric};
 use crate::rate_limiter::{BucketUpdate, RateLimiter};
@@ -197,7 +195,7 @@ impl TryFrom<&BlockDeviceConfig> for VirtioBlockConfig {
                 is_read_only: value.is_read_only.unwrap_or(false),
                 path_on_host: value.path_on_host.as_ref().unwrap().clone(),
                 rate_limiter: value.rate_limiter,
-                file_engine_type: value.file_engine_type,
+                file_engine_type: value.file_engine_type.unwrap_or_default(),
             })
         } else {
             Err(VirtioBlockError::Config)
@@ -216,7 +214,7 @@ impl From<VirtioBlockConfig> for BlockDeviceConfig {
             is_read_only: Some(value.is_read_only),
             path_on_host: Some(value.path_on_host),
             rate_limiter: value.rate_limiter,
-            file_engine_type: value.file_engine_type,
+            file_engine_type: Some(value.file_engine_type),
 
             socket: None,
         }

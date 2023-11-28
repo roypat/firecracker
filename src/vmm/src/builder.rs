@@ -50,8 +50,6 @@ use crate::devices::virtio::net::Net;
 use crate::devices::virtio::rng::Entropy;
 use crate::devices::virtio::vsock::{Vsock, VsockUnixBackend};
 use crate::devices::BusDevice;
-#[cfg(target_arch = "aarch64")]
-use crate::logger;
 use crate::logger::{debug, error};
 use crate::persist::{MicrovmState, MicrovmStateError};
 use crate::resources::VmResources;
@@ -711,7 +709,9 @@ fn attach_legacy_devices_aarch64(
             .map_err(VmmError::RegisterMMIODevice)?;
     }
 
-    let rtc = RTCDevice(Rtc::with_events(&logger::METRICS.rtc));
+    let rtc = RTCDevice(Rtc::with_events(
+        &crate::devices::legacy::rtc_pl031::METRICS,
+    ));
     vmm.mmio_device_manager
         .register_mmio_rtc(rtc, None)
         .map_err(VmmError::RegisterMMIODevice)
@@ -1006,7 +1006,7 @@ pub mod tests {
     use crate::mmds::ns::MmdsNetworkStack;
     use crate::vmm_config::balloon::{BalloonBuilder, BalloonDeviceConfig, BALLOON_DEV_ID};
     use crate::vmm_config::boot_source::DEFAULT_KERNEL_CMDLINE;
-    use crate::vmm_config::drive::{BlockBuilder, BlockDeviceConfig, FileEngineType};
+    use crate::vmm_config::drive::{BlockBuilder, BlockDeviceConfig};
     use crate::vmm_config::entropy::{EntropyDeviceBuilder, EntropyDeviceConfig};
     use crate::vmm_config::net::{NetBuilder, NetworkInterfaceConfig};
     use crate::vmm_config::vsock::tests::default_config;
@@ -1154,7 +1154,7 @@ pub mod tests {
                         .to_string(),
                 ),
                 rate_limiter: None,
-                file_engine_type: FileEngineType::default(),
+                file_engine_type: None,
 
                 socket: None,
             };

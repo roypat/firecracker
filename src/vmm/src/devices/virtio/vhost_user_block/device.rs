@@ -17,14 +17,18 @@ use vhost::vhost_user::Frontend;
 
 use super::{VhostUserBlockError, NUM_QUEUES, QUEUE_SIZE};
 use crate::devices::virtio::block_common::CacheType;
-use crate::devices::virtio::device::{DeviceState, IrqTrigger, VirtioDevice};
+use crate::devices::virtio::device::{DeviceState, IrqTrigger, IrqType, VirtioDevice};
 use crate::devices::virtio::gen::virtio_blk::{
     VIRTIO_BLK_F_FLUSH, VIRTIO_BLK_F_RO, VIRTIO_F_VERSION_1,
 };
 use crate::devices::virtio::gen::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use crate::devices::virtio::queue::Queue;
 use crate::devices::virtio::vhost_user::{VhostUserHandleBackend, VhostUserHandleImpl};
+use crate::devices::virtio::vhost_user_metrics::{
+    VhostUserDeviceMetrics, VhostUserMetricsPerDevice,
+};
 use crate::devices::virtio::{ActivateError, TYPE_BLOCK};
+use crate::logger::{log_dev_preview_warning, IncMetric, StoreMetric};
 use crate::vmm_config::drive::BlockDeviceConfig;
 use crate::vstate::memory::GuestMemoryMmap;
 
@@ -68,6 +72,7 @@ impl TryFrom<&BlockDeviceConfig> for VhostUserBlockConfig {
             && value.is_read_only.is_none()
             && value.path_on_host.is_none()
             && value.rate_limiter.is_none()
+            && value.file_engine_type.is_none()
         {
             Ok(Self {
                 drive_id: value.drive_id.clone(),
@@ -94,7 +99,7 @@ impl From<VhostUserBlockConfig> for BlockDeviceConfig {
             is_read_only: None,
             path_on_host: None,
             rate_limiter: None,
-            file_engine_type: Default::default(),
+            file_engine_type: None,
 
             socket: Some(value.socket),
         }
@@ -127,6 +132,7 @@ pub struct VhostUserBlockImpl<T: VhostUserHandleBackend> {
     // Vhost user protocol handle
     pub vu_handle: VhostUserHandleImpl<T>,
     pub vu_acked_protocol_features: u64,
+    pub metrics: Arc<VhostUserDeviceMetrics>,
 }
 
 // Need custom implementation because otherwise `Debug` is required for `vhost::Master`
@@ -151,12 +157,15 @@ impl<T: VhostUserHandleBackend> std::fmt::Debug for VhostUserBlockImpl<T> {
                 "vu_acked_protocol_features",
                 &self.vu_acked_protocol_features,
             )
+            .field("metrics", &self.metrics)
             .finish()
     }
 }
 
 impl<T: VhostUserHandleBackend> VhostUserBlockImpl<T> {
     pub fn new(config: VhostUserBlockConfig) -> Result<Self, VhostUserBlockError> {
+        log_dev_preview_warning("vhost-user-blk device", Option::None);
+        let start_time = utils::time::get_time_us(utils::time::ClockType::Monotonic);
         let mut requested_features = AVAILABLE_FEATURES;
 
         if config.cache_type == CacheType::Writeback {
@@ -174,12 +183,12 @@ impl<T: VhostUserHandleBackend> VhostUserBlockImpl<T> {
         // Get config from backend if CONFIG is acked or use empty buffer.
         let config_space =
             if acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() != 0 {
-                // This buffer is read only. Ask vhost implementation why.
+                // This buffer is used for config size check in vhost crate.
                 let buffer = [0u8; BLOCK_CONFIG_SPACE_SIZE as usize];
                 let (_, new_config_space) = vu_handle
                     .vu
                     .get_config(
-                        VHOST_USER_CONFIG_OFFSET,
+                        0,
                         BLOCK_CONFIG_SPACE_SIZE,
                         VhostUserConfigFlags::WRITABLE,
                         &buffer,
@@ -204,6 +213,11 @@ impl<T: VhostUserHandleBackend> VhostUserBlockImpl<T> {
         let avail_features = acked_features;
         let acked_features = acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
         let read_only = acked_features & (1 << VIRTIO_BLK_F_RO) != 0;
+        let vhost_user_block_metrics_name = format!("block_{}", config.drive_id);
+
+        let metrics = VhostUserMetricsPerDevice::alloc(vhost_user_block_metrics_name);
+        let delta_us = utils::time::get_time_us(utils::time::ClockType::Monotonic) - start_time;
+        metrics.init_time_us.store(delta_us);
 
         Ok(Self {
             avail_features,
@@ -224,6 +238,7 @@ impl<T: VhostUserHandleBackend> VhostUserBlockImpl<T> {
 
             vu_handle,
             vu_acked_protocol_features: acked_protocol_features,
+            metrics,
         })
     }
 
@@ -240,6 +255,32 @@ impl<T: VhostUserHandleBackend> VhostUserBlockImpl<T> {
             cache_type: self.cache_type,
             socket: self.vu_handle.socket_path.clone(),
         }
+    }
+
+    pub fn config_update(&mut self) -> Result<(), VhostUserBlockError> {
+        let start_time = utils::time::get_time_us(utils::time::ClockType::Monotonic);
+
+        // This buffer is used for config size check in vhost crate.
+        let buffer = [0u8; BLOCK_CONFIG_SPACE_SIZE as usize];
+        let (_, new_config_space) = self
+            .vu_handle
+            .vu
+            .get_config(
+                0,
+                BLOCK_CONFIG_SPACE_SIZE,
+                VhostUserConfigFlags::WRITABLE,
+                &buffer,
+            )
+            .map_err(VhostUserBlockError::Vhost)?;
+        self.config_space = new_config_space;
+        self.irq_trigger
+            .trigger_irq(IrqType::Config)
+            .map_err(VhostUserBlockError::IrqTrigger)?;
+
+        let delta_us = utils::time::get_time_us(utils::time::ClockType::Monotonic) - start_time;
+        self.metrics.config_change_time_us.store(delta_us);
+
+        Ok(())
     }
 }
 
@@ -285,6 +326,7 @@ impl<T: VhostUserHandleBackend + Send + 'static> VirtioDevice for VhostUserBlock
         let config_len = self.config_space.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
+            self.metrics.cfg_fails.inc();
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
@@ -303,6 +345,7 @@ impl<T: VhostUserHandleBackend + Send + 'static> VirtioDevice for VhostUserBlock
     }
 
     fn activate(&mut self, mem: GuestMemoryMmap) -> Result<(), ActivateError> {
+        let start_time = utils::time::get_time_us(utils::time::ClockType::Monotonic);
         // Setting features again, because now we negotiated them
         // with guest driver as well.
         self.vu_handle
@@ -314,8 +357,13 @@ impl<T: VhostUserHandleBackend + Send + 'static> VirtioDevice for VhostUserBlock
                 &[(0, &self.queues[0], &self.queue_evts[0])],
                 &self.irq_trigger,
             )
-            .map_err(ActivateError::VhostUser)?;
+            .map_err(|err| {
+                self.metrics.activate_fails.inc();
+                ActivateError::VhostUser(err)
+            })?;
         self.device_state = DeviceState::Activated(mem);
+        let delta_us = utils::time::get_time_us(utils::time::ClockType::Monotonic) - start_time;
+        self.metrics.activate_time_us.store(delta_us);
         Ok(())
     }
 
@@ -329,11 +377,14 @@ mod tests {
     #![allow(clippy::undocumented_unsafe_blocks)]
 
     use std::os::unix::net::UnixStream;
+    use std::sync::atomic::Ordering;
 
     use utils::tempfile::TempFile;
     use vhost::{VhostUserMemoryRegionInfo, VringConfigData};
 
     use super::*;
+    use crate::devices::virtio::mmio::VIRTIO_MMIO_INT_CONFIG;
+    use crate::devices::virtio::virtio_block::device::FileEngineType;
     use crate::utilities::test_utils::create_tmp_socket;
     use crate::vstate::memory::{FileOffset, GuestAddress, GuestMemoryExtension};
 
@@ -348,7 +399,7 @@ mod tests {
             is_read_only: None,
             path_on_host: None,
             rate_limiter: None,
-            file_engine_type: Default::default(),
+            file_engine_type: None,
 
             socket: Some("sock".to_string()),
         };
@@ -363,7 +414,7 @@ mod tests {
             is_read_only: Some(true),
             path_on_host: Some("path".to_string()),
             rate_limiter: None,
-            file_engine_type: Default::default(),
+            file_engine_type: Some(FileEngineType::Sync),
 
             socket: None,
         };
@@ -378,7 +429,7 @@ mod tests {
             is_read_only: Some(true),
             path_on_host: Some("path".to_string()),
             rate_limiter: None,
-            file_engine_type: Default::default(),
+            file_engine_type: Some(FileEngineType::Sync),
 
             socket: Some("sock".to_string()),
         };
@@ -606,6 +657,15 @@ mod tests {
         // Writing to the config does nothing
         vhost_block.write_config(0x69, &[0]);
         assert_eq!(vhost_block.config_space, vec![0x69, 0x69, 0x69]);
+
+        // Testing [`config_update`]
+        vhost_block.config_space = vec![];
+        vhost_block.config_update().unwrap();
+        assert_eq!(vhost_block.config_space, vec![0x69, 0x69, 0x69]);
+        assert_eq!(
+            vhost_block.interrupt_status().load(Ordering::SeqCst),
+            VIRTIO_MMIO_INT_CONFIG
+        );
     }
 
     #[test]
