@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.forced == false }}
     steps:
+      - name: "Check out repository"
+        uses: actions/checkout@v4
       - name: "Trigger Buildkite Pipeline"
         run: |
           should_schedule_ab_test=0
