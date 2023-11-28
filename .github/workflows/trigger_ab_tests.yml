@@ -13,8 +13,7 @@ jobs:
         uses: actions/checkout@v4
       - name: "Trigger Buildkite Pipeline"
         run: |
-          git checkout HEAD^
-          git log
+          git status
           should_schedule_ab_test=0
           for f in $(git --no-pager diff --name-only ${{ github.event.before }}..${{ github.event.after }}); do
             if [[ "$(basename $f)" =~ (\.(rs|toml|lock)|config)$ ]]; then
