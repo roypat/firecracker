@@ -11,14 +11,22 @@ jobs:
     steps:
       - name: "Trigger Buildkite Pipeline"
         run: |
-          curl -X POST https://api.buildkite.com/v2/organizations/firecracker/pipelines/performance-a-b-tests/builds \
-               -H 'Content-Type: application/json' \
-               -H 'Authorization: Bearer ${{ secrets.BUILDKITE_TOKEN }}' \
-               -d "{
-                    \"commit\": \"HEAD\",
-                    \"branch\": \"$GITHUB_REF_NAME\",
-                    \"env\": {
-                      \"REVISION_A\": \"${{ github.event.before }}\",
-                      \"REVISION_B\": \"${{ github.event.after }}\"
-                    }
-                  }"
+          should_schedule_ab_test=0
+          for f in $(git --no-pager diff --name-only ${{ github.event.before }}..${{ github.event.after }}); do
+            if [[ "$(basename $f)" =~ (\.(rs|toml|lock)|config)$ ]]; then
+              should_schedule_ab_test=1
+            fi
+          done
+          if [[ $should_schedule_ab_test -eq 1 ]]; then
+            curl -X POST https://api.buildkite.com/v2/organizations/firecracker/pipelines/performance-a-b-tests/builds \
+                 -H 'Content-Type: application/json' \
+                 -H 'Authorization: Bearer ${{ secrets.BUILDKITE_TOKEN }}' \
+                 -d "{
+                      \"commit\": \"HEAD\",
+                      \"branch\": \"$GITHUB_REF_NAME\",
+                      \"env\": {
+                        \"REVISION_A\": \"${{ github.event.before }}\",
+                        \"REVISION_B\": \"${{ github.event.after }}\"
+                      }
+                    }"
+          fi
