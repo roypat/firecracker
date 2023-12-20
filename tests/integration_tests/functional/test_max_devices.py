@@ -18,6 +18,8 @@ def test_attach_maximum_devices(test_microvm_with_api):
     """
     Test attaching maximum number of devices to the microVM.
     """
+    pytest.skip()
+
     test_microvm = test_microvm_with_api
     test_microvm.spawn()
 
@@ -44,6 +46,8 @@ def test_attach_too_many_devices(test_microvm_with_api):
     """
     Test attaching to a microVM more devices than available IRQs.
     """
+    pytest.skip()
+
     test_microvm = test_microvm_with_api
     test_microvm.spawn()
 

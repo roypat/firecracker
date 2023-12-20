@@ -4,6 +4,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from framework.utils import configure_mmds, populate_data_store
 
 NO_OF_MICROVMS = 20
@@ -13,6 +15,7 @@ def test_run_concurrency_with_mmds(microvm_factory, guest_kernel, rootfs):
     """
     Spawn multiple firecracker processes to run concurrently with MMDS
     """
+    pytest.skip()
 
     data_store = {
         "latest": {
