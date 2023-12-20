@@ -35,7 +35,11 @@ def partuuid_and_disk_path(rootfs_ubuntu_22, disk_path):
         f"losetup --find --partscan --show {str(disk_path)}", shell=True
     )
     loop_dev = stdout.decode("ascii").strip()
-    check_output(f"dd if={str(rootfs_ubuntu_22)} of={loop_dev}p1", shell=True)
+    print(initial_size / 1024 / 1024)
+    print(disk_path)
+    print(loop_dev)
+    print(check_output("fdisk -l", shell=True).decode('utf-8'))
+    print(check_output(f"dd if={str(rootfs_ubuntu_22)} of={loop_dev}p1", shell=True).decode('utf-8'))
 
     # UUID=$(sudo blkid -s UUID -o value "${loop_dev}p1")
     stdout = check_output(f"blkid -s PARTUUID -o value {loop_dev}p1", shell=True)
