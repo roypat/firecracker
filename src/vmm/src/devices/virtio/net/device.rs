@@ -444,51 +444,8 @@ impl Net {
         guest_mac: Option<MacAddr>,
         net_metrics: &NetDeviceMetrics,
     ) -> Result<bool, NetError> {
-        // Read the frame headers from the IoVecBuffer
-        let max_header_len = headers.len();
-        let header_len = frame_iovec
-            .read_volatile_at(&mut &mut *headers, 0, max_header_len)
-            .map_err(|err| {
-                error!("Received malformed TX buffer: {:?}", err);
-                net_metrics.tx_malformed_frames.inc();
-                NetError::VnetHeaderMissing
-            })?;
-
-        let headers = frame_bytes_from_buf(&headers[..header_len]).map_err(|e| {
-            error!("VNET headers missing in TX frame");
-            net_metrics.tx_malformed_frames.inc();
-            e
-        })?;
-
-        if let Some(ns) = mmds_ns {
-            if ns.is_mmds_frame(headers) {
-                let mut frame = vec![0u8; frame_iovec.len() - vnet_hdr_len()];
-                // Ok to unwrap here, because we are passing a buffer that has the exact size
-                // of the `IoVecBuffer` minus the VNET headers.
-                frame_iovec
-                    .read_exact_volatile_at(&mut frame, vnet_hdr_len())
-                    .unwrap();
-                let _ = ns.detour_frame(&frame);
-                METRICS.mmds.rx_accepted.inc();
-
-                // MMDS frames are not accounted by the rate limiter.
-                Self::rate_limiter_replenish_op(rate_limiter, frame_iovec.len() as u64);
-
-                // MMDS consumed the frame.
-                return Ok(true);
-            }
-        }
 
         // This frame goes to the TAP.
-
-        // Check for guest MAC spoofing.
-        if let Some(guest_mac) = guest_mac {
-            let _ = EthernetFrame::from_bytes(headers).map(|eth_frame| {
-                if guest_mac != eth_frame.src_mac() {
-                    net_metrics.tx_spoofed_mac_count.inc();
-                }
-            });
-        }
 
         match Self::write_tap(tap, frame_iovec) {
             Ok(_) => {
