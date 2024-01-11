@@ -61,6 +61,37 @@ impl HugePageConfig {
 
         mem_size_mib % divisor == 0
     }
+
+    /// Returns the flags required to pass to `mmap`, in addition to `MAP_ANONYMOUS`, to
+    /// create a mapping backed by huge pages as described by this [`HugePageConfig`].
+    ///
+    /// Returns `0` if `self == HugePageConfig::Thp`, as transparent huge pages are enabled
+    /// via `madvise` instead of `mmap` flags.
+    pub fn mmap_flags(&self) -> libc::c_int {
+        match self {
+            HugePageConfig::None | HugePageConfig::Thp => 0,
+            HugePageConfig::Hugetlbfs2M => libc::MAP_HUGETLB | libc::MAP_HUGE_2MB,
+            HugePageConfig::Hugetlbfs1G => libc::MAP_HUGETLB | libc::MAP_HUGE_1GB,
+        }
+    }
+
+    /// Returns `true` iff this [`HugePageConfig`] describes a hugetlbfs-based configuration.
+    pub fn is_hugetlbfs(&self) -> bool {
+        matches!(
+            self,
+            HugePageConfig::Hugetlbfs2M | HugePageConfig::Hugetlbfs1G
+        )
+    }
+}
+
+impl From<HugePageConfig> for Option<memfd::HugetlbSize> {
+    fn from(value: HugePageConfig) -> Self {
+        match value {
+            HugePageConfig::None | HugePageConfig::Thp => None,
+            HugePageConfig::Hugetlbfs2M => Some(memfd::HugetlbSize::Huge2MB),
+            HugePageConfig::Hugetlbfs1G => Some(memfd::HugetlbSize::Huge1GB),
+        }
+    }
 }
 
 /// Struct used in PUT `/machine-config` API call.

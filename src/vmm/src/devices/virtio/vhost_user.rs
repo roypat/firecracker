@@ -771,7 +771,8 @@ mod tests {
             ),
         ];
 
-        let guest_memory = GuestMemoryMmap::from_raw_regions_file(regions, false, false).unwrap();
+        let guest_memory =
+            GuestMemoryMmap::from_raw_regions_file(regions, false, false, false).unwrap();
 
         vuh.update_mem_table(&guest_memory).unwrap();
 
@@ -889,7 +890,8 @@ mod tests {
             region_size,
         )];
 
-        let guest_memory = GuestMemoryMmap::from_raw_regions_file(regions, false, false).unwrap();
+        let guest_memory =
+            GuestMemoryMmap::from_raw_regions_file(regions, false, false, false).unwrap();
 
         let queue = Queue::new(69);
         let event_fd = EventFd::new(0).unwrap();
