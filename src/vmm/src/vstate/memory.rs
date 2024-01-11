@@ -363,7 +363,7 @@ pub fn create_memfd(size: usize) -> Result<memfd::Memfd, MemoryError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     #![allow(clippy::undocumented_unsafe_blocks)]
 
     use std::collections::HashMap;
