@@ -303,6 +303,7 @@ mod tests {
             let base_config = VmConfig::default();
             let update = MachineConfigUpdate {
                 huge_pages: Some(HugePageConfig::Hugetlbfs1G),
+                mem_size_mib: Some(1024),
                 ..Default::default()
             };
 
