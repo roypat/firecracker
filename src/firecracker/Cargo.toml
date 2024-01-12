@@ -54,8 +54,8 @@ name = "uffd_malicious_handler"
 path = "examples/uffd/malicious_handler.rs"
 
 [[example]]
-name = "uffd_valid_handler"
-path = "examples/uffd/valid_handler.rs"
+name = "uffd_valid_4k_handler"
+path = "examples/uffd/valid_4k_handler.rs"
 
 [[example]]
 name = "seccomp_harmless"
