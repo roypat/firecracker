@@ -6,12 +6,17 @@ import pytest
 from framework import utils
 from framework.microvm import HugePagesConfig
 from framework.properties import global_props
+from integration_tests.functional.test_uffd import SOCKET_PATH, spawn_pf_handler
 
 
-def check_hugetlbfs_in_use(pid):
-    """Asserts that the process with the given pid is using hugetlbfs pages somewhere"""
+def check_hugetlbfs_in_use(pid: int, allocation_name: str):
+    """Asserts that the process with the given `pid` is using hugetlbfs pages somewhere.
 
-    # Format of a smaps entry:
+    `allocation_name` should be the name of the smaps entry for which we want to verify that huge pages are used.
+    For memfd-backed guest memory, this would be "memfd:guest_mem", for anonymous memory this would be "/anon_hugepage"
+    """
+
+    # Format of a sample smaps entry:
     #   7fc2bc400000-7fc2cc400000 rw-s 00000000 00:10 25488401                   /memfd:guest_mem (deleted)
     #   Size:             262144 kB
     #   KernelPageSize:     2048 kB
@@ -37,7 +42,7 @@ def check_hugetlbfs_in_use(pid):
     #   THPeligible:           0
     #   ProtectionKey:         0
     # the "memfd:guest_mem" is the identifier of our guest memory. It is memfd backed, with the memfd being called "guest_mem" in memory.rs
-    cmd = f"cat /proc/{pid}/smaps | grep memfd:guest_mem -A 23 | grep KernelPageSize"
+    cmd = f"cat /proc/{pid}/smaps | grep {allocation_name} -A 23 | grep KernelPageSize"
     _, stdout, _ = utils.run_cmd(cmd)
 
     kernel_page_size_kib = int(stdout.split()[1])
@@ -59,4 +64,51 @@ def test_hugetlbfs_boot(uvm_plain):
     rc, _, _ = uvm_plain.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(uvm_plain.firecracker_pid)
+    check_hugetlbfs_in_use(uvm_plain.firecracker_pid, "memfd:guest_mem")
+
+
+@pytest.mark.skipif(
+    global_props.host_linux_version == "4.14",
+    reason="MFD_HUGETLB | MFD_ALLOW_SEALING only supported on kernels >= 4.16",
+)
+def test_hugetlbfs_snapshot(
+    microvm_factory, guest_kernel_linux_5_10, rootfs_ubuntu_22, uffd_handler_paths
+):
+    """
+    Test hugetlbfs snapshot restore via uffd
+    """
+
+    ### Create Snapshot ###
+    vm = microvm_factory.build(guest_kernel_linux_5_10, rootfs_ubuntu_22)
+    vm.memory_monitor = None
+    vm.spawn()
+    vm.basic_config(huge_pages=HugePagesConfig.HUGETLBFS_2MB, mem_size_mib=128)
+    vm.add_net_iface()
+    vm.start()
+
+    # Wait for microvm to boot
+    rc, _, _ = vm.ssh.run("true")
+    assert not rc
+
+    check_hugetlbfs_in_use(vm.firecracker_pid, "memfd:guest_mem")
+
+    snapshot = vm.snapshot_full()
+
+    vm.kill()
+
+    ### Restore Snapshot ###
+    vm = microvm_factory.build()
+    vm.spawn()
+
+    # Spawn page fault handler process.
+    _pf_handler = spawn_pf_handler(
+        vm, uffd_handler_paths["valid_2m_handler"], snapshot.mem
+    )
+
+    vm.restore_from_snapshot(snapshot, resume=True, uffd_path=SOCKET_PATH)
+
+    # Verify if guest can run commands.
+    rc, _, _ = vm.ssh.run("true")
+    assert not rc
+
+    check_hugetlbfs_in_use(vm.firecracker_pid, "/anon_hugepage")
