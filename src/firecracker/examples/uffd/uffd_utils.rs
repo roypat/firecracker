@@ -12,7 +12,6 @@ use std::{mem, ptr};
 
 use serde::Deserialize;
 use userfaultfd::Uffd;
-use utils::get_page_size;
 use utils::sock_ctrl_msg::ScmSocket;
 
 // This is the same with the one used in src/vmm.
@@ -42,6 +41,7 @@ struct MemRegion {
 #[derive(Debug)]
 pub struct UffdPfHandler {
     mem_regions: Vec<MemRegion>,
+    page_size: usize,
     backing_buffer: *const u8,
     pub uffd: Uffd,
     // Not currently used but included to demonstrate how a page fault handler can
@@ -49,7 +49,7 @@ pub struct UffdPfHandler {
     _firecracker_pid: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum MemPageState {
     Uninitialized,
     FromFile,
@@ -58,7 +58,12 @@ pub enum MemPageState {
 }
 
 impl UffdPfHandler {
-    pub fn from_unix_stream(stream: UnixStream, data: *const u8, size: usize) -> Self {
+    pub fn from_unix_stream(
+        stream: UnixStream,
+        data: *const u8,
+        size: usize,
+        page_size: usize,
+    ) -> Self {
         let mut message_buf = vec![0u8; 1024];
         let (bytes_read, file) = stream
             .recv_with_fd(&mut message_buf[..])
@@ -74,26 +79,28 @@ impl UffdPfHandler {
 
         // Make sure memory size matches backing data size.
         assert_eq!(memsize, size);
+        assert!(page_size.is_power_of_two());
 
         let uffd = unsafe { Uffd::from_raw_fd(file.into_raw_fd()) };
 
         let creds: libc::ucred = get_peer_process_credentials(stream);
 
-        let mem_regions = create_mem_regions(&mappings);
+        let mem_regions = create_mem_regions(&mappings, page_size);
 
         Self {
             mem_regions,
+            page_size,
             backing_buffer: data,
             uffd,
             _firecracker_pid: creds.pid as u32,
         }
     }
 
-    pub fn update_mem_state_mappings(&mut self, start: u64, end: u64, state: &MemPageState) {
+    pub fn update_mem_state_mappings(&mut self, start: u64, end: u64, state: MemPageState) {
         for region in self.mem_regions.iter_mut() {
             for (key, value) in region.page_states.iter_mut() {
                 if key >= &start && key < &end {
-                    *value = state.clone();
+                    *value = state;
                 }
             }
         }
@@ -116,24 +123,20 @@ impl UffdPfHandler {
     }
 
     fn zero_out(&mut self, addr: u64) -> (u64, u64) {
-        let page_size = get_page_size().unwrap();
-
         let ret = unsafe {
             self.uffd
-                .zeropage(addr as *mut _, page_size, true)
+                .zeropage(addr as *mut _, self.page_size, true)
                 .expect("Uffd zeropage failed")
         };
         // Make sure the UFFD zeroed out some bytes.
         assert!(ret > 0);
 
-        return (addr, addr + page_size as u64);
+        return (addr, addr + self.page_size as u64);
     }
 
     pub fn serve_pf(&mut self, addr: *mut u8, len: usize) {
-        let page_size = get_page_size().unwrap();
-
         // Find the start of the page that the current faulting address belongs to.
-        let dst = (addr as usize & !(page_size as usize - 1)) as *mut libc::c_void;
+        let dst = (addr as usize & !(self.page_size as usize - 1)) as *mut libc::c_void;
         let fault_page_addr = dst as u64;
 
         // Get the state of the current faulting page.
@@ -149,12 +152,12 @@ impl UffdPfHandler {
                 //    memory from the host (through balloon device)
                 Some(MemPageState::Uninitialized) | Some(MemPageState::FromFile) => {
                     let (start, end) = self.populate_from_file(region, fault_page_addr, len);
-                    self.update_mem_state_mappings(start, end, &MemPageState::FromFile);
+                    self.update_mem_state_mappings(start, end, MemPageState::FromFile);
                     return;
                 }
                 Some(MemPageState::Removed) | Some(MemPageState::Anonymous) => {
                     let (start, end) = self.zero_out(fault_page_addr);
-                    self.update_mem_state_mappings(start, end, &MemPageState::Anonymous);
+                    self.update_mem_state_mappings(start, end, MemPageState::Anonymous);
                     return;
                 }
                 None => {
@@ -194,8 +197,7 @@ fn get_peer_process_credentials(stream: UnixStream) -> libc::ucred {
     creds
 }
 
-fn create_mem_regions(mappings: &Vec<GuestRegionUffdMapping>) -> Vec<MemRegion> {
-    let page_size = get_page_size().unwrap();
+fn create_mem_regions(mappings: &Vec<GuestRegionUffdMapping>, page_size: usize) -> Vec<MemRegion> {
     let mut mem_regions: Vec<MemRegion> = Vec::with_capacity(mappings.len());
 
     for r in mappings.iter() {
@@ -217,7 +219,7 @@ fn create_mem_regions(mappings: &Vec<GuestRegionUffdMapping>) -> Vec<MemRegion> 
     mem_regions
 }
 
-pub fn create_pf_handler() -> UffdPfHandler {
+pub fn create_pf_handler(page_size: usize) -> UffdPfHandler {
     let uffd_sock_path = std::env::args().nth(1).expect("No socket path given");
     let mem_file_path = std::env::args().nth(2).expect("No memory file given");
 
@@ -245,5 +247,54 @@ pub fn create_pf_handler() -> UffdPfHandler {
 
     let (stream, _) = listener.accept().expect("Cannot listen on UDS socket");
 
-    UffdPfHandler::from_unix_stream(stream, memfile_buffer, size)
+    UffdPfHandler::from_unix_stream(stream, memfile_buffer, size, page_size)
+}
+
+pub fn handle_faults(page_size: usize) -> ! {
+    let mut uffd_handler = create_pf_handler(page_size);
+
+    let mut pollfd = libc::pollfd {
+        fd: uffd_handler.uffd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // Loop, handling incoming events on the userfaultfd file descriptor.
+    loop {
+        // See what poll() tells us about the userfaultfd.
+        let nready = unsafe { libc::poll(&mut pollfd, 1, -1) };
+
+        if nready == -1 {
+            panic!("Could not poll for events!")
+        }
+
+        let revents = pollfd.revents;
+
+        println!(
+            "poll() returns: nready = {}; POLLIN = {}; POLLERR = {}",
+            nready,
+            revents & libc::POLLIN,
+            revents & libc::POLLERR,
+        );
+
+        // Read an event from the userfaultfd.
+        let event = uffd_handler
+            .uffd
+            .read_event()
+            .expect("Failed to read uffd_msg")
+            .expect("uffd_msg not ready");
+
+        // We expect to receive either a Page Fault or Removed
+        // event (if the balloon device is enabled).
+        match event {
+            userfaultfd::Event::Pagefault { addr, .. } => {
+                uffd_handler.serve_pf(addr as *mut u8, page_size)
+            }
+            userfaultfd::Event::Remove { start, end } => uffd_handler.update_mem_state_mappings(
+                start as *mut u8 as u64,
+                end as *mut u8 as u64,
+                MemPageState::Removed,
+            ),
+            _ => panic!("Unexpected event on userfaultfd"),
+        }
+    }
 }

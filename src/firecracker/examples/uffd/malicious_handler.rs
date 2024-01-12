@@ -11,7 +11,7 @@ use std::os::unix::io::AsRawFd;
 use uffd_utils::create_pf_handler;
 
 fn main() {
-    let uffd_handler = create_pf_handler();
+    let uffd_handler = create_pf_handler(4096);
 
     let mut pollfd = libc::pollfd {
         fd: uffd_handler.uffd.as_raw_fd(),
