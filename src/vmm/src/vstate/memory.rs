@@ -52,6 +52,8 @@ pub enum MemoryError {
     MemfdSetLen(std::io::Error),
     /// Failed to use madvise to enable THP: {0:?}
     Madvise(std::io::Error),
+    /// Cannot restore hugetlbfs backed snapshot by mapping the memory file. Please use uffd.
+    HugetlbfsSnapshot,
 }
 
 /// Defines the interface for snapshotting memory.
@@ -87,6 +89,7 @@ where
         file: Option<&File>,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
+        huge_pages: HugePageConfig,
     ) -> Result<Self, MemoryError>;
 
     /// Describes GuestMemoryMmap through a GuestMemoryState struct.
@@ -227,9 +230,14 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         file: Option<&File>,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
+        huge_pages: HugePageConfig,
     ) -> Result<Self, MemoryError> {
         match file {
             Some(f) => {
+                if huge_pages.is_hugetlbfs() {
+                    return Err(MemoryError::HugetlbfsSnapshot);
+                }
+
                 let regions = state
                     .regions
                     .iter()
@@ -242,7 +250,12 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     .collect::<Result<Vec<_>, std::io::Error>>()
                     .map_err(MemoryError::FileError)?;
 
-                Self::from_raw_regions_file(regions, track_dirty_pages, false, false)
+                Self::from_raw_regions_file(
+                    regions,
+                    track_dirty_pages,
+                    false,
+                    huge_pages == HugePageConfig::Thp,
+                )
             }
             None => {
                 let regions = state
@@ -250,7 +263,7 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     .iter()
                     .map(|r| (GuestAddress(r.base_address), r.size))
                     .collect::<Vec<_>>();
-                Self::from_raw_regions(&regions, track_dirty_pages, HugePageConfig::None)
+                Self::from_raw_regions(&regions, track_dirty_pages, huge_pages)
             }
         }
     }
@@ -513,6 +526,25 @@ pub mod tests {
     }
 
     #[test]
+    fn test_from_state() {
+        let state = GuestMemoryState {
+            regions: vec![GuestMemoryRegionState {
+                base_address: 0,
+                size: 4096,
+                offset: 0,
+            }],
+        };
+        let file = TempFile::new().unwrap().into_file();
+
+        // No mapping of snapshots that were taken with hugetlbfs enabled
+        let err =
+            GuestMemoryMmap::from_state(Some(&file), &state, false, HugePageConfig::Hugetlbfs2M)
+                .unwrap_err();
+
+        assert!(matches!(err, MemoryError::HugetlbfsSnapshot), "{:?}", err);
+    }
+
+    #[test]
     fn test_mark_dirty() {
         let page_size = get_page_size().unwrap();
         let region_size = page_size * 3;
@@ -691,8 +723,13 @@ pub mod tests {
         let mut memory_file = TempFile::new().unwrap().into_file();
         guest_memory.dump(&mut memory_file).unwrap();
 
-        let restored_guest_memory =
-            GuestMemoryMmap::from_state(Some(&memory_file), &memory_state, false).unwrap();
+        let restored_guest_memory = GuestMemoryMmap::from_state(
+            Some(&memory_file),
+            &memory_state,
+            false,
+            HugePageConfig::None,
+        )
+        .unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; page_size * 2];
@@ -750,7 +787,8 @@ pub mod tests {
 
         // We can restore from this because this is the first dirty dump.
         let restored_guest_memory =
-            GuestMemoryMmap::from_state(Some(&file), &memory_state, false).unwrap();
+            GuestMemoryMmap::from_state(Some(&file), &memory_state, false, HugePageConfig::None)
+                .unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; region_size];
