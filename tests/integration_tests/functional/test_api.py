@@ -400,7 +400,10 @@ def test_api_machine_config(test_microvm_with_api):
 
     # Test invalid mem_size_mib = 0.
     with pytest.raises(
-        RuntimeError, match=re.escape("The memory size (MiB) is invalid.")
+        RuntimeError,
+        match=re.escape(
+            "The memory size (MiB) is either 0, or not a multiple of the configured page size."
+        ),
     ):
         test_microvm.api.machine_config.patch(mem_size_mib=0)
 
@@ -1112,6 +1115,7 @@ def test_get_full_config_after_restoring_snapshot(microvm_factory, uvm_nano):
         "mem_size_mib": 256,
         "smt": True,
         "track_dirty_pages": False,
+        "huge_pages": "None",
     }
 
     if cpu_vendor == utils_cpuid.CpuVendor.ARM:
@@ -1228,6 +1232,7 @@ def test_get_full_config(test_microvm_with_api):
         "mem_size_mib": 256,
         "smt": False,
         "track_dirty_pages": False,
+        "huge_pages": "None",
     }
     expected_cfg["cpu-config"] = None
     expected_cfg["boot-source"] = {
