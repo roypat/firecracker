@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Firecracker snapshots (up to Firecracker version v1.6.0) incompatible with
   the current Firecracker version.
 
+### Fixed
+
+- [#????](...):
+  Made `PATCH` requests to the `/machine-config` endpoint transactional, meaning
+  Firecracker's configuration will be unchanged if the request returns an error.
+  This fixes a bug where a microVM with incompatible balloon and guest memory size
+  could be booted, due to the check for this condition happening after Firecracker's
+  configuration was updated.
+
 ## [v1.6.0]
 
 ### Added
