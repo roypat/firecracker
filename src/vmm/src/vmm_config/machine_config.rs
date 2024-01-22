@@ -35,6 +35,8 @@ pub enum VmConfigError {
     HugetlbfsNotSupported,
     /// Firecracker's huge pages support is incompatible with memory ballooning.
     BalloonAndHugePages,
+    /// Firecracker's huge pages support is incompatible with differential snapshotting.
+    DiffSnapshotsAndHugePages,
 }
 
 // We cannot do a `KernelVersion(kernel_version::Error)` variant because `kernel_version::Error`
@@ -254,12 +256,18 @@ impl VmConfig {
             return Err(VmConfigError::HugetlbfsNotSupported);
         }
 
+        let track_dirty_pages = update.track_dirty_pages.unwrap_or(self.track_dirty_pages);
+
+        if track_dirty_pages && page_config != HugePageConfig::None {
+            return Err(VmConfigError::DiffSnapshotsAndHugePages);
+        }
+
         Ok(VmConfig {
             vcpu_count,
             mem_size_mib,
             smt,
             cpu_template,
-            track_dirty_pages: update.track_dirty_pages.unwrap_or(self.track_dirty_pages),
+            track_dirty_pages,
             huge_pages: page_config,
         })
     }
@@ -311,6 +319,22 @@ mod tests {
 
             let err = base_config.update(&update).unwrap_err();
             assert_eq!(err, VmConfigError::HugetlbfsNotSupported)
+        }
+    }
+
+    #[test]
+    fn test_dirty_tracking_and_huge_pages_negative() {
+        if KernelVersion::get().unwrap() >= KernelVersion::new(5, 10, 0) {
+            let base_config = VmConfig::default();
+            let update = MachineConfigUpdate {
+                huge_pages: Some(HugePageConfig::Hugetlbfs2M),
+                mem_size_mib: Some(1024),
+                track_dirty_pages: Some(true),
+                ..Default::default()
+            };
+
+            let err = base_config.update(&update).unwrap_err();
+            assert_eq!(err, VmConfigError::DiffSnapshotsAndHugePages)
         }
     }
 }
