@@ -284,6 +284,8 @@ impl Vcpu {
             }
         }
 
+        let thing = &self.kvm_vcpu.fd.get_kvm_run().immediate_exit;
+
         // By default don't change state.
         let mut state = StateMachine::next(Self::running);
 

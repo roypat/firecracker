@@ -112,7 +112,7 @@ impl UffdPfHandler {
 
         let ret = unsafe {
             self.uffd
-                .copy(src as *const _, dst as *mut _, len, true)
+                .copy(self.backing_buffer as _, region.mapping.base_host_virt_addr as *mut _, region.mapping.size, true)
                 .expect("Uffd copy failed")
         };
 
@@ -122,21 +122,21 @@ impl UffdPfHandler {
         (dst, dst + len as u64)
     }
 
-    fn zero_out(&mut self, addr: u64) -> (u64, u64) {
+    fn zero_out(&mut self, addr: u64, len: usize) -> (u64, u64) {
         let ret = unsafe {
             self.uffd
-                .zeropage(addr as *mut _, self.page_size, true)
+                .zeropage(addr as *mut _, len, true)
                 .expect("Uffd zeropage failed")
         };
         // Make sure the UFFD zeroed out some bytes.
         assert!(ret > 0);
 
-        return (addr, addr + self.page_size as u64);
+        return (addr, addr + len as u64);
     }
 
     pub fn serve_pf(&mut self, addr: *mut u8, len: usize) {
         // Find the start of the page that the current faulting address belongs to.
-        let dst = (addr as usize & !(self.page_size as usize - 1)) as *mut libc::c_void;
+        let dst = (addr as usize & !(len as usize - 1)) as *mut libc::c_void;
         let fault_page_addr = dst as u64;
 
         // Get the state of the current faulting page.
@@ -156,7 +156,7 @@ impl UffdPfHandler {
                     return;
                 }
                 Some(MemPageState::Removed) | Some(MemPageState::Anonymous) => {
-                    let (start, end) = self.zero_out(fault_page_addr);
+                    let (start, end) = self.zero_out(fault_page_addr, len);
                     self.update_mem_state_mappings(start, end, MemPageState::Anonymous);
                     return;
                 }
@@ -240,6 +240,9 @@ pub fn create_pf_handler(page_size: usize) -> UffdPfHandler {
     if ret == libc::MAP_FAILED {
         panic!("mmap failed");
     }
+    unsafe {
+        libc::madvise(ret, size, libc::MADV_HUGEPAGE);
+    }
     let memfile_buffer = ret as *const u8;
 
     // Get Uffd from UDS. We'll use the uffd to handle PFs for Firecracker.
@@ -250,7 +253,7 @@ pub fn create_pf_handler(page_size: usize) -> UffdPfHandler {
     UffdPfHandler::from_unix_stream(stream, memfile_buffer, size, page_size)
 }
 
-pub fn handle_faults(page_size: usize) -> ! {
+pub fn handle_faults(page_size: usize, fault_size: usize) -> ! {
     let mut uffd_handler = create_pf_handler(page_size);
 
     let mut pollfd = libc::pollfd {
@@ -287,7 +290,7 @@ pub fn handle_faults(page_size: usize) -> ! {
         // event (if the balloon device is enabled).
         match event {
             userfaultfd::Event::Pagefault { addr, .. } => {
-                uffd_handler.serve_pf(addr as *mut u8, page_size)
+                uffd_handler.serve_pf(addr as *mut u8, fault_size)
             }
             userfaultfd::Event::Remove { start, end } => uffd_handler.update_mem_state_mappings(
                 start as *mut u8 as u64,

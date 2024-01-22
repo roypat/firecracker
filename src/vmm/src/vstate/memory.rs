@@ -7,6 +7,7 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
+use std::os::fd::AsRawFd;
 
 use serde::{Deserialize, Serialize};
 use utils::{errno, get_page_size, u64_to_usize};
@@ -206,12 +207,22 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     true => Some(AtomicBitmap::with_len(region_size)),
                     false => None,
                 };
-                let region = MmapRegionBuilder::new_with_bitmap(region_size, bitmap)
-                    .with_mmap_prot(prot)
-                    .with_mmap_flags(flags)
-                    .with_file_offset(file_offset)
-                    .build()
-                    .map_err(MemoryError::MmapRegionError)?;
+
+                let excess = if use_thp {2} else {0};
+
+                let first_region = unsafe {libc::mmap(std::ptr::null_mut(), region_size + excess, prot,  flags | libc::MAP_ANONYMOUS, -1, 0)};
+                assert_ne!(first_region, libc::MAP_FAILED, "{:?}", std::io::Error::last_os_error());
+                let start_aligned = unsafe {
+                    first_region.offset(first_region.align_offset(2 * 1024 * 1024) as isize)
+                };
+                dbg!(first_region);
+                dbg!(start_aligned);
+                let second_region = unsafe {
+                    libc::mmap(start_aligned, region_size, prot, flags | libc::MAP_FIXED, file_offset.file().as_raw_fd(), file_offset.start() as _)
+                };
+                assert_ne!(second_region, libc::MAP_FAILED);
+
+                let region = unsafe{ MmapRegionBuilder::new_with_bitmap(region_size, bitmap).with_raw_mmap_pointer(second_region as _).build().unwrap()};
 
                 if use_thp {
                     enable_thp(&region).map_err(MemoryError::Madvise)?;

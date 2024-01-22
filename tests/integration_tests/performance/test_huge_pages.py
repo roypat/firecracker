@@ -9,7 +9,7 @@ from framework.properties import global_props
 from integration_tests.functional.test_uffd import SOCKET_PATH, spawn_pf_handler
 
 
-def check_hugetlbfs_in_use(pid: int, allocation_name: str):
+def check_hugetlbfs_in_use(pid: int, allocation_name: str, key: str, expected_value: str):
     """Asserts that the process with the given `pid` is using hugetlbfs pages somewhere.
 
     `allocation_name` should be the name of the smaps entry for which we want to verify that huge pages are used.
@@ -42,11 +42,12 @@ def check_hugetlbfs_in_use(pid: int, allocation_name: str):
     #   THPeligible:           0
     #   ProtectionKey:         0
     # the "memfd:guest_mem" is the identifier of our guest memory. It is memfd backed, with the memfd being called "guest_mem" in memory.rs
-    cmd = f"cat /proc/{pid}/smaps | grep {allocation_name} -A 23 | grep KernelPageSize"
+    print(utils.run_cmd(f"cat /proc/{pid}/smaps | grep {allocation_name} -A 23 -B 1").stdout)
+    cmd = f"cat /proc/{pid}/smaps | grep {allocation_name} -A 23 | grep {key}"
     _, stdout, _ = utils.run_cmd(cmd)
 
-    kernel_page_size_kib = int(stdout.split()[1])
-    assert kernel_page_size_kib > 4
+    value = stdout.split()[1]
+    assert value == expected_value
 
 
 @pytest.mark.skipif(
@@ -64,8 +65,66 @@ def test_hugetlbfs_boot(uvm_plain):
     rc, _, _ = uvm_plain.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(uvm_plain.firecracker_pid, "memfd:guest_mem")
+    check_hugetlbfs_in_use(uvm_plain.firecracker_pid, "memfd:guest_mem", "KernelPageSize", "2048")
 
+
+@pytest.mark.skipif(
+    global_props.host_linux_version == "4.14",
+    reason="MFD_HUGETLB | MFD_ALLOW_SEALING only supported on kernels >= 4.16",
+)
+def test_thp_boot(uvm_plain):
+    """Tests booting a microvm with guest memory backed by 2MB hugetlbfs pages"""
+
+    uvm_plain.spawn()
+    uvm_plain.basic_config(huge_pages=HugePagesConfig.THP, mem_size_mib=128)
+    uvm_plain.add_net_iface()
+    uvm_plain.start()
+
+    rc, _, _ = uvm_plain.ssh.run("true")
+    assert not rc
+
+    check_hugetlbfs_in_use(uvm_plain.firecracker_pid, "memfd:guest_mem", "THPeligible", "1")
+
+
+def test_thp_snapshot(
+    microvm_factory, guest_kernel_linux_5_10, rootfs_ubuntu_22, uffd_handler_paths
+):
+    """
+    Test hugetlbfs snapshot restore via uffd
+    """
+
+    ### Create Snapshot ###
+    vm = microvm_factory.build(guest_kernel_linux_5_10, rootfs_ubuntu_22)
+    vm.memory_monitor = None
+    vm.spawn()
+    vm.basic_config(huge_pages=HugePagesConfig.THP, mem_size_mib=128)
+    vm.add_net_iface()
+    vm.start()
+
+    # Wait for microvm to boot
+    rc, _, _ = vm.ssh.run("true")
+    assert not rc
+
+    snapshot = vm.snapshot_full()
+
+    vm.kill()
+
+    ### Restore Snapshot ###
+    vm = microvm_factory.build()
+    vm.spawn()
+
+    # Spawn page fault handler process.
+    _pf_handler = spawn_pf_handler(
+        vm, uffd_handler_paths["valid_2m_handler"], snapshot.mem
+    )
+
+    vm.restore_from_snapshot(snapshot, resume=True, uffd_path=SOCKET_PATH)
+
+    # Verify if guest can run commands.
+    rc, _, _ = vm.ssh.run("true")
+    assert not rc
+
+    check_hugetlbfs_in_use(vm.firecracker_pid, "131072", "THPeligible", "1")
 
 @pytest.mark.skipif(
     global_props.host_linux_version == "4.14",
@@ -90,7 +149,7 @@ def test_hugetlbfs_snapshot(
     rc, _, _ = vm.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(vm.firecracker_pid, "memfd:guest_mem")
+    check_hugetlbfs_in_use(vm.firecracker_pid, "memfd:guest_mem", "KernelPageSize", "2048")
 
     snapshot = vm.snapshot_full()
 
@@ -111,7 +170,7 @@ def test_hugetlbfs_snapshot(
     rc, _, _ = vm.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(vm.firecracker_pid, "/anon_hugepage")
+    check_hugetlbfs_in_use(vm.firecracker_pid, "/anon_hugepage", "KernelPageSize", "2048")
 
 
 @pytest.mark.skipif(

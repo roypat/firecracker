@@ -8,5 +8,5 @@
 mod uffd_utils;
 
 fn main() {
-    uffd_utils::handle_faults(4096)
+    uffd_utils::handle_faults(4096, 4096)
 }
