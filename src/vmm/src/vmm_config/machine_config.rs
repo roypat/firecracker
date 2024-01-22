@@ -37,6 +37,8 @@ pub enum VmConfigError {
     BalloonAndHugePages,
     /// Firecracker's huge pages support is incompatible with differential snapshotting.
     DiffSnapshotsAndHugePages,
+    /// Firecracker's huge pages support is incompatible with initrds.
+    InitrdAndHugePages,
 }
 
 // We cannot do a `KernelVersion(kernel_version::Error)` variant because `kernel_version::Error`
