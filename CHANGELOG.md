@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VcpuExit::MmioRead`, `VcpuExit::MmioWrite`, `VcpuExit::IoIn` and
   `VcpuExit::IoOut`. The average for these VM exits is not emitted since
   it can be deduced from the available emitted metrics.
+- [#4360](https://github.com/firecracker-microvm/firecracker/pull/4360):
+  Added dev-preview support for backing a VM's guest memory by 2M hugetlbfs
+  pages.
 
 ### Changed
 
