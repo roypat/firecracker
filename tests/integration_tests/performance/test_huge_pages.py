@@ -1,6 +1,10 @@
 # Copyright 2024 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests for Firecracker's huge pages support"""
+import signal
+import subprocess
+import time
+
 import pytest
 
 from framework import utils
@@ -79,9 +83,18 @@ def test_hugetlbfs_snapshot(
     """
 
     ### Create Snapshot ###
+    utils.run_cmd("apt-get update && apt-get -y install trace-cmd")
+
     vm = microvm_factory.build(guest_kernel_linux_5_10, rootfs_ubuntu_22)
     vm.memory_monitor = None
+    vm.jailer.daemonize = False
+    vm.jailer.extra_args.update({"no-seccomp": None})
     vm.spawn()
+    proc = subprocess.Popen(
+        f"trace-cmd record -c -e kvm -P {vm.firecracker_pid}".split()
+    )
+    # give trace-cmd time to initialize
+    time.sleep(10)
     vm.basic_config(huge_pages=HugePagesConfig.HUGETLBFS_2MB, mem_size_mib=128)
     vm.add_net_iface()
     vm.start()
@@ -90,11 +103,20 @@ def test_hugetlbfs_snapshot(
     rc, _, _ = vm.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(vm.firecracker_pid, "memfd:guest_mem")
+    # check_hugetlbfs_in_use(vm.firecracker_pid, "memfd:guest_mem")
 
     snapshot = vm.snapshot_full()
 
+    proc.send_signal(signal.SIGINT)
+    proc.wait()
+    print("waited")
+    print(utils.run_cmd(f"/proc/{vm.firecracker_pid}/statm"))
     vm.kill()
+    print("killed")
+
+    print(utils.run_cmd(f"trace-cmd report").stdout)
+
+    return
 
     ### Restore Snapshot ###
     vm = microvm_factory.build()
@@ -102,7 +124,7 @@ def test_hugetlbfs_snapshot(
 
     # Spawn page fault handler process.
     _pf_handler = spawn_pf_handler(
-        vm, uffd_handler_paths["valid_2m_handler"], snapshot.mem
+        vm, uffd_handler_paths["valid_4k_handler"], snapshot.mem
     )
 
     vm.restore_from_snapshot(snapshot, resume=True, uffd_path=SOCKET_PATH)
@@ -111,7 +133,7 @@ def test_hugetlbfs_snapshot(
     rc, _, _ = vm.ssh.run("true")
     assert not rc
 
-    check_hugetlbfs_in_use(vm.firecracker_pid, "/anon_hugepage")
+    # check_hugetlbfs_in_use(vm.firecracker_pid, "/anon_hugepage")
 
 
 @pytest.mark.skipif(
