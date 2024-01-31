@@ -1,10 +1,10 @@
 # Boot protocol register settings
 
-Firecracker makes certain modifications to the guest's registers
-regardless of whether a CPU template is used to comply with the boot protocol.
-If a CPU template is used the boot protocol settings are performed _after_ the
-CPU template is applied. That means that if the CPU template configures CPUID
-bits used in the boot protocol settings, they will be overwritten.
+Firecracker makes certain modifications to the guest's registers regardless of
+whether a CPU template is used to comply with the boot protocol. If a CPU
+template is used the boot protocol settings are performed _after_ the CPU
+template is applied. That means that if the CPU template configures CPUID bits
+used in the boot protocol settings, they will be overwritten.
 
 See also: [CPUID normalization](cpuid-normalization.md)
 

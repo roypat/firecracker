@@ -4,12 +4,12 @@ This is a very simple quick-start guide to getting a Firecracker guest connected
 to the network. If you're using Firecracker in production, or even want to run
 multiple guests, you'll need to adapt this setup.
 
-**Note**
-Currently firecracker supports only TUN/TAP network backend with no multi queue support.
+**Note** Currently firecracker supports only TUN/TAP network backend with no
+multi queue support.
 
 The simple steps in this guide assume that your internet-facing interface is
-`eth0`, you have nothing else using `tap0` and no other `iptables` rules.
-Check out the *Advanced:* sections if that doesn't work for you.
+`eth0`, you have nothing else using `tap0` and no other `iptables` rules. Check
+out the _Advanced:_ sections if that doesn't work for you.
 
 ## On The Host
 
@@ -31,16 +31,16 @@ sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 sudo iptables -A FORWARD -i tap0 -o eth0 -j ACCEPT
 ```
 
-*Note:* The IP of the TAP device should be chosen such that it's not in the same
+_Note:_ The IP of the TAP device should be chosen such that it's not in the same
 subnet as the IP address of the host.
 
-*Advanced:* If you are running multiple Firecracker MicroVMs in parallel, or
+_Advanced:_ If you are running multiple Firecracker MicroVMs in parallel, or
 have something else on your system using `tap0` then you need to create a `tap`
 for each one, with a unique name.
 
-*Advanced:* You also need to do the `iptables` set up for each new `tap`. If
-you have `iptables` rules you care about on your host, you may want to save
-those rules before starting.
+_Advanced:_ You also need to do the `iptables` set up for each new `tap`. If you
+have `iptables` rules you care about on your host, you may want to save those
+rules before starting.
 
 ```bash
 sudo iptables-save > iptables.rules.old
@@ -63,8 +63,8 @@ curl --unix-socket /tmp/firecracker.socket -i \
     }'
 ```
 
-If you are using a configuration file instead of the API, add a section
-to your configuration file like this:
+If you are using a configuration file instead of the API, add a section to your
+configuration file like this:
 
 ```json
 "network-interfaces": [
@@ -90,8 +90,8 @@ ip route add default via 172.16.0.1 dev eth0
 ```
 
 Now your guest should be able to route traffic to the internet (assuming that
-your host can get to the internet). To do anything useful, you probably want
-to resolve DNS names. In production, you'd want to use the right DNS server for
+your host can get to the internet). To do anything useful, you probably want to
+resolve DNS names. In production, you'd want to use the right DNS server for
 your environment. For testing, you can add a public DNS server to
 `/etc/resolv.conf` by adding a line like this:
 
@@ -118,8 +118,8 @@ nameserver 8.8.8.8
 1. Define an IP address in your network for the bridge.
 
    For example, if your gateway were on `192.168.1.1` and you wanted to use this
-   for getting dynamic IPs, you would want to give the bridge an unused IP address
-   in the `192.168.1.0/24` subnet.
+   for getting dynamic IPs, you would want to give the bridge an unused IP
+   address in the `192.168.1.0/24` subnet.
 
    ```bash
    sudo ip address add 192.168.1.7/24 dev br0
@@ -195,7 +195,7 @@ sudo sh -c "echo 0 > /proc/sys/net/ipv4/ip_forward" # usually the default
 If you have an existing iptables setup, you'll want to be more careful about
 cleaning up.
 
-*Advanced:* If you saved your iptables rules in the first step, then you can
+_Advanced:_ If you saved your iptables rules in the first step, then you can
 restore them like this:
 
 ```bash
@@ -204,7 +204,7 @@ if [ -f iptables.rules.old ]; then
 fi
 ```
 
-*Advanced:* If you created a bridge interface, delete it using the following:
+_Advanced:_ If you created a bridge interface, delete it using the following:
 
 ```bash
 sudo ip link del br0

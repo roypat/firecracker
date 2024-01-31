@@ -8,8 +8,8 @@ buffer that will be filled with random bytes from the device. The source of
 random bytes that the device will use to fill the buffers is an implementation
 decision.
 
-On the guest side, the kernel uses random bytes received through the device
-as an extra source of entropy. Moreover, the guest VirtIO driver exposes the
+On the guest side, the kernel uses random bytes received through the device as
+an extra source of entropy. Moreover, the guest VirtIO driver exposes the
 `/dev/hwrng` character device. User-space applications can use this device to
 request random bytes from the device.
 
@@ -38,8 +38,8 @@ curl --unix-socket $socket_location -i \
     }"
 ```
 
-If a configuration file is used for configuring a microVM, the same setup can
-be achieved by adding a section like this:
+If a configuration file is used for configuring a microVM, the same setup can be
+achieved by adding a section like this:
 
 ```json
 "entropy": {
@@ -53,8 +53,8 @@ be achieved by adding a section like this:
 }
 ```
 
-On the host side, Firecracker relies on [`aws-lc-rs`][2] to retrieve the random bytes.
-`aws-lc-rs` uses the [`AWS-LC` cryptographic library][3].
+On the host side, Firecracker relies on [`aws-lc-rs`][2] to retrieve the random
+bytes. `aws-lc-rs` uses the [`AWS-LC` cryptographic library][3].
 
 ## Prerequisites
 
@@ -63,6 +63,7 @@ In order to use the entropy device, users must use a kernel with the
 kernel configuration option is `CONFIG_HW_RANDOM_VIRTIO` (which depends on
 `CONFIG_HW_RANDOM` and `CONFIG_VIRTIO`).
 
-[1]: https://docs.oasis-open.org/virtio/virtio/v1.2/cs01/virtio-v1.2-cs01.html#x1-3050004
+[1]:
+  https://docs.oasis-open.org/virtio/virtio/v1.2/cs01/virtio-v1.2-cs01.html#x1-3050004
 [2]: https://docs.rs/aws-lc-rs/latest/aws_lc_rs/index.html
 [3]: https://github.com/aws/aws-lc
