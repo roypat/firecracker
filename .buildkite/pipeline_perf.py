@@ -51,6 +51,11 @@ perf_test = {
         "test_path": "'integration_tests/performance/test_memory_overhead.py integration_tests/performance/test_boottime.py::test_boottime'",
         "devtool_opts": "-c 1-10 -m 0",
     },
+    "startup-time": {
+        "label": "a",
+        "test_path": "integration_tests/performance/test_process_startup_time.py",
+        "devtool_opts": "-c 1-10 -m 0",
+    },
 }
 
 REVISION_A = os.environ.get("REVISION_A")

@@ -11,53 +11,61 @@ from framework.properties import global_props
 from host_tools.cargo_build import run_seccompiler_bin
 
 
-@pytest.fixture
-def startup_time(metrics, record_property):
-    """Fixture to capture the startup time"""
-    metrics.set_dimensions(
-        {
-            "instance": global_props.instance,
-            "cpu_model": global_props.cpu_model,
-            "host_kernel": "linux-" + global_props.host_linux_version,
-        }
-    )
-
-    def record_startup_time(startup_time):
-        metrics.put_metric("startup_time", startup_time, unit="Microseconds")
-        record_property("startup_time_μs", startup_time)
-
-    return record_startup_time
+def record_startup_time(metrics, startup_time, suffix: str):
+    metrics.put_metric(f"startup_time_{suffix}", startup_time, unit="Microseconds")
 
 
-def test_startup_time_new_pid_ns(test_microvm_with_api, startup_time):
+def test_startup_time_new_pid_ns(
+    microvm_factory, rootfs, guest_kernel_linux_5_10, metrics
+):
     """
     Check startup time when jailer is spawned in a new PID namespace.
     """
-    microvm = test_microvm_with_api
-    microvm.jailer.new_pid_ns = True
-    startup_time(_test_startup_time(microvm))
+    for _ in range(10):
+        microvm = microvm_factory.build(guest_kernel_linux_5_10, rootfs)
+        microvm.jailer.new_pid_ns = True
+        record_startup_time(
+            metrics,
+            _test_startup_time(microvm, metrics, "test_startup_time_new_pid_ns"),
+            "new_pid_ns",
+        )
 
 
-def test_startup_time_daemonize(test_microvm_with_api, startup_time):
+def test_startup_time_daemonize(
+    microvm_factory, rootfs, guest_kernel_linux_5_10, metrics
+):
     """
     Check startup time when jailer detaches Firecracker from the controlling terminal.
     """
-    microvm = test_microvm_with_api
-    startup_time(_test_startup_time(microvm))
+    for _ in range(10):
+        microvm = microvm_factory.build(guest_kernel_linux_5_10, rootfs)
+        record_startup_time(
+            metrics,
+            _test_startup_time(microvm, metrics, "test_startup_time_daemonize"),
+            "daemonize",
+        )
 
 
-def test_startup_time_custom_seccomp(test_microvm_with_api, startup_time):
+def test_startup_time_custom_seccomp(
+    microvm_factory, rootfs, guest_kernel_linux_5_10, metrics
+):
     """
     Check the startup time when using custom seccomp filters.
     """
-    microvm = test_microvm_with_api
-    _custom_filter_setup(microvm)
-    startup_time(_test_startup_time(microvm))
+    for _ in range(10):
+        microvm = microvm_factory.build(guest_kernel_linux_5_10, rootfs)
+        _custom_filter_setup(microvm)
+        record_startup_time(
+            metrics,
+            _test_startup_time(microvm, metrics, "test_startup_time_custom_seccomp"),
+            "custom_seccomp",
+        )
 
 
-def _test_startup_time(microvm):
+def _test_startup_time(microvm, metrics, test):
     microvm.spawn()
     microvm.basic_config(vcpu_count=2, mem_size_mib=1024)
+    metrics.set_dimensions({"performance_test": test, **microvm.dimensions})
     test_start_time = time.time()
     microvm.start()
     time.sleep(0.4)
