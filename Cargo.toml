@@ -26,3 +26,4 @@ lto = true
 
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/firecracker-microvm/kvm-bindings", tag = "v0.7.0-2", features = ["fam-wrappers"] }
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory", branch = "main"}

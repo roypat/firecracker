@@ -1518,8 +1518,7 @@ dependencies = [
 [[package]]
 name = "vm-memory"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74ffc42216c32c35f858fa4bfdcd9b61017dfd691e0240268fdc85dbf59e5459"
+source = "git+https://github.com/rust-vmm/vm-memory?branch=main#2739a71fd922180618ec350679c9f83d6f7ed9b6"
 dependencies = [
  "libc",
  "thiserror",
