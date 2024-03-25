@@ -10,6 +10,7 @@ use std::io::{self, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
 use event_manager::{MutEventSubscriber, SubscriberOps};
+use kvm_bindings::KVMIO;
 use libc::EFD_NONBLOCK;
 use linux_loader::cmdline::Cmdline as LoaderKernelCmdline;
 #[cfg(target_arch = "x86_64")]
@@ -22,10 +23,13 @@ use userfaultfd::Uffd;
 use utils::eventfd::EventFd;
 use utils::time::TimestampUs;
 use utils::u64_to_usize;
-use vm_memory::ReadVolatile;
+use vm_memory::{Address, GuestMemory, GuestMemoryRegion, ReadVolatile};
 #[cfg(target_arch = "aarch64")]
 use vm_superio::Rtc;
 use vm_superio::Serial;
+use vmm_sys_util::ioctl::ioctl_with_ref;
+use vmm_sys_util::syscall::SyscallReturnCode;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr};
 
 #[cfg(target_arch = "x86_64")]
 use crate::acpi;
@@ -60,10 +64,10 @@ use crate::snapshot::Persist;
 use crate::vmm_config::boot_source::BootConfig;
 use crate::vmm_config::instance_info::InstanceInfo;
 use crate::vmm_config::machine_config::{VmConfig, VmConfigError};
-use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryExtension, GuestMemoryMmap};
+use crate::vstate::memory::{GuestAddress, GuestMemoryExtension, GuestMemoryMmap, MemoryError};
 use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuError};
 use crate::vstate::vm::Vm;
-use crate::{device_manager, EventManager, Vmm, VmmError};
+use crate::{device_manager, mem_size_mib, EventManager, Vmm, VmmError};
 
 /// Errors associated with starting the instance.
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -134,7 +138,7 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 fn create_vmm_and_vcpus(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
-    guest_memory: GuestMemoryMmap,
+    shared_memory: &GuestMemoryMmap,
     uffd: Option<Uffd>,
     track_dirty_pages: bool,
     vcpu_count: u8,
@@ -147,7 +151,12 @@ fn create_vmm_and_vcpus(
     let mut vm = Vm::new(kvm_capabilities)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
-    vm.memory_init(&guest_memory, track_dirty_pages)
+
+    let (private_memory, guest_memfd) =
+        GuestMemoryMmap::guest_memfd_backed(vm.fd(), mem_size_mib(shared_memory))
+            .map_err(StartMicrovmError::GuestMemory)?;
+
+    vm.memory_init(shared_memory, &guest_memfd, track_dirty_pages)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
@@ -207,7 +216,10 @@ fn create_vmm_and_vcpus(
         instance_info: instance_info.clone(),
         shutdown_exit_code: None,
         vm,
-        guest_memory,
+        // For now, put the private memory here, so that all setup code operates on private memory.
+        // Later, we swap it out for the shared one.
+        guest_memory: private_memory,
+        guest_memfd,
         uffd,
         vcpus_handles: Vec::new(),
         vcpus_exit_evt,
@@ -242,55 +254,33 @@ pub fn build_microvm_for_boot(
 
     let track_dirty_pages = vm_resources.track_dirty_pages();
 
-    let vhost_user_device_used = vm_resources
-        .block
-        .devices
-        .iter()
-        .any(|b| b.lock().expect("Poisoned lock").is_vhost_user());
+    assert!(!track_dirty_pages); // doesn't work with guest_memfd
 
-    // Page faults are more expensive for shared memory mapping, including  memfd.
-    // For this reason, we only back guest memory with a memfd
-    // if a vhost-user-blk device is configured in the VM, otherwise we fall back to
-    // an anonymous private memory.
-    //
-    // The vhost-user-blk branch is not currently covered by integration tests in Rust,
-    // because that would require running a backend process. If in the future we converge to
-    // a single way of backing guest memory for vhost-user and non-vhost-user cases,
-    // that would not be worth the effort.
-    let guest_memory = if vhost_user_device_used {
-        GuestMemoryMmap::memfd_backed(
-            vm_resources.vm_config.mem_size_mib,
-            track_dirty_pages,
-            vm_resources.vm_config.huge_pages,
-        )
-        .map_err(StartMicrovmError::GuestMemory)?
-    } else {
-        let regions = crate::arch::arch_memory_regions(vm_resources.vm_config.mem_size_mib << 20);
-        GuestMemoryMmap::from_raw_regions(
-            &regions,
-            track_dirty_pages,
-            vm_resources.vm_config.huge_pages,
-        )
-        .map_err(StartMicrovmError::GuestMemory)?
-    };
-
-    let entry_addr = load_kernel(boot_config, &guest_memory)?;
-    let initrd = load_initrd_from_config(boot_config, &guest_memory)?;
-    // Clone the command-line so that a failed boot doesn't pollute the original.
-    #[allow(unused_mut)]
-    let mut boot_cmdline = boot_config.cmdline.clone();
+    let mut shared_memory = GuestMemoryMmap::memfd_backed(
+        vm_resources.vm_config.mem_size_mib,
+        track_dirty_pages,
+        vm_resources.vm_config.huge_pages,
+    )
+    .map_err(StartMicrovmError::GuestMemory)?;
 
     let cpu_template = vm_resources.vm_config.cpu_template.get_cpu_template()?;
 
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
-        guest_memory,
+        &shared_memory,
         None,
         track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
     )?;
+
+    let entry_addr = load_kernel(boot_config, &vmm.guest_memory)?;
+    let initrd = load_initrd_from_config(boot_config, &vmm.guest_memory)?;
+
+    // Clone the command-line so that a failed boot doesn't pollute the original.
+    #[allow(unused_mut)]
+    let mut boot_cmdline = boot_config.cmdline.clone();
 
     // The boot timer device needs to be the first device attached in order
     // to maintain the same MMIO address referenced in the documentation
@@ -336,6 +326,63 @@ pub fn build_microvm_for_boot(
         &initrd,
         boot_cmdline,
     )?;
+
+    // All the above operations could do access to guest memory. For this reason, we store the
+    // GuestMemoryMmap that represents the mmap'd guest_memfd inside of `Vmm`. Now, swap it out for
+    // the "shared" one (alternatively, use a bogus one because any access to guest memory after
+    // this swap will never be seen by the guest anyway) so that we can drop the private mapping
+    // (pre-requisite for setting the memory attributes to private, otherwise we get EPERM).
+    //std::mem::swap(&mut vmm.guest_memory, &mut shared_memory);
+    //let private_memory = shared_memory;
+
+    // unmap it again so that we can flip set the attributes to private
+    for region in vmm.guest_memory.iter() {
+        unsafe {
+            libc::munmap(region.as_ptr() as *mut libc::c_void, region.len() as _);
+        }
+    }
+    //drop(private_memory);
+
+    /// Bitflag to mark a specific (range of) page frame(s) as private
+    const KVM_MEMORY_ATTRIBUTE_PRIVATE: u64 = 1u64 << 3;
+
+    #[allow(non_camel_case_types)]
+    #[repr(C)]
+    #[derive(Copy, Clone, Default)]
+    struct kvm_memory_attributes {
+        address: u64,
+        size: u64,
+        attributes: u64,
+        flags: u64,
+    }
+
+    /// VM ioctl used to mark guest page frames as shared/private
+    ioctl_iow_nr!(
+        KVM_SET_MEMORY_ATTRIBUTES,
+        KVMIO,
+        0xd2,
+        kvm_memory_attributes
+    );
+
+    for region in vmm.guest_memory.iter() {
+        let attributes = kvm_memory_attributes {
+            address: region.start_addr().raw_value(),
+            size: region.len(),
+            attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE,
+            ..Default::default()
+        };
+
+        unsafe {
+            SyscallReturnCode(ioctl_with_ref(
+                vmm.vm.fd(),
+                KVM_SET_MEMORY_ATTRIBUTES(),
+                &attributes,
+            ))
+            .into_empty_result()
+            .map_err(MemoryError::SetMemoryAttributes)
+            .map_err(StartMicrovmError::GuestMemory)?
+        }
+    }
 
     // Move vcpus to their own threads and start their state machine in the 'Paused' state.
     vmm.start_vcpus(
@@ -446,7 +493,7 @@ pub fn build_microvm_from_snapshot(
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
-        guest_memory.clone(),
+        &guest_memory,
         uffd,
         vm_resources.vm_config.track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
