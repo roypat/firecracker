@@ -7,7 +7,11 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::ptr::null_mut;
 
+use kvm_bindings::KVMIO;
+use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 use utils::{errno, get_page_size, u64_to_usize};
 pub use vm_memory::bitmap::{AtomicBitmap, Bitmap, BitmapSlice, BS};
@@ -18,9 +22,12 @@ pub use vm_memory::{
     GuestUsize, MemoryRegionAddress, MmapRegion,
 };
 use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
+use vmm_sys_util::ioctl::ioctl_with_ref;
+use vmm_sys_util::syscall::SyscallReturnCode;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iowr_nr};
 
 use crate::vmm_config::machine_config::HugePageConfig;
-use crate::DirtyBitmap;
+use crate::{DirtyBitmap, Vm};
 
 /// Type of GuestMemoryMmap.
 pub type GuestMemoryMmap = vm_memory::GuestMemoryMmap<Option<AtomicBitmap>>;
@@ -34,7 +41,11 @@ pub type GuestMmapRegion = vm_memory::MmapRegion<Option<AtomicBitmap>>;
 pub enum MemoryError {
     /// Cannot access file: {0}
     FileError(std::io::Error),
-    /// Cannot create memory: {0}
+    /// Failed to create guest_memfd: {0:?}
+    GuestMemfd(std::io::Error),
+    /// Failed to set memory attributes to private: {0:?}.
+    SetMemoryAttributes(std::io::Error),
+    /// Cannot create memory: {0:?}
     CreateMemory(VmMemoryError),
     /// Cannot create memory region: {0}
     CreateRegion(MmapRegionError),
@@ -65,6 +76,11 @@ where
         track_dirty_pages: bool,
         huge_pages: HugePageConfig,
     ) -> Result<Self, MemoryError>;
+
+    fn guest_memfd_backed(
+        associated_vm: &VmFd,
+        mem_size_mib: u64,
+    ) -> Result<(Self, File), MemoryError>;
 
     /// Creates a GuestMemoryMmap from raw regions.
     fn from_raw_regions(
@@ -155,6 +171,33 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         Self::from_raw_regions_file(regions, track_dirty_pages, true)
     }
 
+    fn guest_memfd_backed(
+        associated_vm: &VmFd,
+        mem_size_mib: u64,
+    ) -> Result<(Self, File), MemoryError> {
+        let guest_memfd = create_guest_memfd(associated_vm, mem_size_mib << 20)?;
+
+        let mut offset: u64 = 0;
+        let regions = crate::arch::arch_memory_regions((mem_size_mib as usize) << 20)
+            .iter()
+            .map(|(guest_address, region_size)| {
+                let file_clone = guest_memfd.try_clone().map_err(MemoryError::FileError)?;
+                let file_offset = FileOffset::new(file_clone, offset);
+                offset += *region_size as u64;
+                Ok((file_offset, *guest_address, *region_size))
+            })
+            .collect::<Result<Vec<_>, MemoryError>>()?;
+
+        // track_dirty_pages: false -> havent checked yet if dirty page tracking works with guest
+        // memory taken out of the direct map, but I suspect no shared: true -> a
+        // requirement of the "allow mmaping guest_memfd" patch series (to avoid having to deal with
+        // CoW)
+        Ok((
+            Self::from_raw_regions_file(regions, false, true)?,
+            guest_memfd,
+        ))
+    }
+
     /// Creates a GuestMemoryMmap from raw regions backed by anonymous memory.
     fn from_raw_regions(
         regions: &[(GuestAddress, usize)],
@@ -209,12 +252,27 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     true => Some(AtomicBitmap::with_len(region_size)),
                     false => None,
                 };
-                let region = MmapRegionBuilder::new_with_bitmap(region_size, bitmap)
-                    .with_mmap_prot(prot)
-                    .with_mmap_flags(flags)
-                    .with_file_offset(file_offset)
-                    .build()
-                    .map_err(MemoryError::MmapRegionError)?;
+                let region = unsafe {
+                    MmapRegionBuilder::new_with_bitmap(region_size, bitmap)
+                        .with_raw_mmap_pointer({
+                            let ret = libc::mmap(
+                                null_mut(),
+                                region_size,
+                                prot,
+                                flags,
+                                file_offset.file().as_raw_fd(),
+                                file_offset.start() as _,
+                            );
+                            if ret == libc::MAP_FAILED {
+                                return Err(MemoryError::MmapRegionError(MmapRegionError::Mmap(
+                                    std::io::Error::last_os_error(),
+                                )));
+                            }
+                            ret as _
+                        })
+                        .build()
+                        .map_err(MemoryError::MmapRegionError)?
+                };
 
                 GuestRegionMmap::new(region, guest_address).map_err(MemoryError::VmMemoryError)
             })
@@ -416,6 +474,38 @@ fn create_memfd(
         .map_err(MemoryError::Memfd)?;
 
     Ok(mem_file)
+}
+
+fn create_guest_memfd(vm: &VmFd, size: u64) -> Result<File, MemoryError> {
+    #[allow(non_camel_case_types)]
+    #[repr(C)]
+    #[derive(Copy, Clone, Default)]
+    pub struct kvm_create_guest_memfd {
+        size: u64,
+        flags: u64,
+        reserved: [u64; 6],
+    }
+
+    /// ioctl to create a guest_memfd. Has to be executed on a vm fd, to which
+    /// the returned guest_memfd will be bound (e.g. it can only be used to back
+    /// memory in that specific VM).
+    ioctl_iowr_nr!(KVM_CREATE_GUEST_MEMFD, KVMIO, 0xd4, kvm_create_guest_memfd);
+
+    let guest_memfd = SyscallReturnCode(unsafe {
+        ioctl_with_ref(
+            vm,
+            KVM_CREATE_GUEST_MEMFD(),
+            &kvm_create_guest_memfd {
+                size,
+                flags: 0,
+                ..Default::default()
+            },
+        )
+    })
+    .into_result()
+    .map_err(MemoryError::GuestMemfd)?;
+
+    unsafe { Ok(File::from_raw_fd(guest_memfd)) }
 }
 
 #[cfg(test)]

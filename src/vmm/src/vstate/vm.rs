@@ -7,6 +7,8 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
+use std::fs::File;
+use std::os::fd::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
@@ -14,11 +16,14 @@ use kvm_bindings::{
     KVM_CLOCK_TSC_STABLE, KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE,
     KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY,
 };
-use kvm_bindings::{kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES};
+use kvm_bindings::{kvm_userspace_memory_region, KVMIO, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES};
 use kvm_ioctls::{Kvm, VmFd};
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "x86_64")]
 use utils::u64_to_usize;
+use vmm_sys_util::ioctl::ioctl_with_ref;
+use vmm_sys_util::syscall::SyscallReturnCode;
+use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr};
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::GICDevice;
@@ -133,6 +138,9 @@ pub struct Vm {
 impl Vm {
     /// Constructs a new `Vm` using the given `Kvm` instance.
     pub fn new(kvm_cap_modifiers: Vec<KvmCapability>) -> Result<Self, VmError> {
+        /// VM type that supports guest private memory
+        const KVM_X86_SW_PROTECTED_VM: u64 = 1;
+
         let kvm = Kvm::new().map_err(VmError::Kvm)?;
 
         // Check that KVM has the correct version.
@@ -148,7 +156,9 @@ impl Vm {
 
         let max_memslots = kvm.get_nr_memslots();
         // Create fd for interacting with kvm-vm specific functions.
-        let vm_fd = kvm.create_vm().map_err(VmError::VmFd)?;
+        let vm_fd = kvm
+            .create_vm_with_type(KVM_X86_SW_PROTECTED_VM)
+            .map_err(VmError::VmFd)?;
 
         #[cfg(target_arch = "aarch64")]
         {
@@ -209,13 +219,14 @@ impl Vm {
     /// Initializes the guest memory.
     pub fn memory_init(
         &self,
-        guest_mem: &GuestMemoryMmap,
+        shared_memory: &GuestMemoryMmap,
+        guest_memfd: &File,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
-        if guest_mem.num_regions() > self.max_memslots {
+        if shared_memory.num_regions() > self.max_memslots {
             return Err(VmError::NotEnoughMemorySlots);
         }
-        self.set_kvm_memory_regions(guest_mem, track_dirty_pages)?;
+        self.set_kvm_memory_regions(shared_memory, guest_memfd, track_dirty_pages)?;
         #[cfg(target_arch = "x86_64")]
         self.fd
             .set_tss_address(u64_to_usize(crate::arch::x86_64::layout::KVM_TSS_ADDRESS))
@@ -226,31 +237,65 @@ impl Vm {
 
     pub(crate) fn set_kvm_memory_regions(
         &self,
-        guest_mem: &GuestMemoryMmap,
+        shared_memory: &GuestMemoryMmap,
+        guest_memfd: &File,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
-        let mut flags = 0u32;
-        if track_dirty_pages {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        /// Flag passed to [`KVM_SET_USER_MEMORY_REGION2`] to indicate that a region supports
+        /// private memory.
+        const KVM_MEM_PRIVATE: u32 = 1 << 2;
+
+        #[allow(non_camel_case_types)]
+        #[repr(C)]
+        #[derive(Copy, Clone, Default, Debug)]
+        struct kvm_userspace_memory_region2 {
+            slot: u32,
+            flags: u32,
+            guest_phys_addr: u64,
+            memory_size: u64,
+            userspace_addr: u64,
+            guest_memfd_offset: u64,
+            guest_memfd: u32,
+            pad1: u32,
+            pad2: [u64; 14],
         }
-        guest_mem
+
+        /// VM ioctl for registering memory regions that have a guest_memfd associated with them
+        ioctl_iow_nr!(
+            KVM_SET_USER_MEMORY_REGION2,
+            KVMIO,
+            0x49,
+            kvm_userspace_memory_region2
+        );
+
+        let flags = KVM_MEM_PRIVATE;
+
+        shared_memory
             .iter()
-            .zip(0u32..)
-            .try_for_each(|(region, slot)| {
-                let memory_region = kvm_userspace_memory_region {
-                    slot,
+            .enumerate()
+            .try_for_each(|(index, region)| {
+                let memory_region = kvm_userspace_memory_region2 {
+                    slot: u32::try_from(index).unwrap(),
                     guest_phys_addr: region.start_addr().raw_value(),
                     memory_size: region.len(),
                     // It's safe to unwrap because the guest address is valid.
-                    userspace_addr: guest_mem.get_host_address(region.start_addr()).unwrap() as u64,
+                    userspace_addr: shared_memory.get_host_address(region.start_addr()).unwrap()
+                        as u64,
+                    guest_memfd_offset: region.start_addr().raw_value(),
+                    guest_memfd: guest_memfd.as_raw_fd() as u32,
                     flags,
+                    ..Default::default()
                 };
 
-                // SAFETY: Safe because the fd is a valid KVM file descriptor.
-                unsafe { self.fd.set_user_memory_region(memory_region) }
+                if unsafe {
+                    ioctl_with_ref(&self.fd, KVM_SET_USER_MEMORY_REGION2(), &memory_region)
+                } < 0
+                {
+                    Err(VmError::SetUserMemoryRegion(kvm_ioctls::Error::last()))
+                } else {
+                    Ok(())
+                }
             })
-            .map_err(VmError::SetUserMemoryRegion)?;
-        Ok(())
     }
 
     /// Gets a reference to the kvm file descriptor owned by this VM.

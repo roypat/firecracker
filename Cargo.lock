@@ -1411,6 +1411,23 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "userfaultfd"
+<<<<<<< HEAD
+=======
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6a38c7e24af201e66f02659492f86ccd5efa9fd62f2c851fff3961a60e81966"
+dependencies = [
+ "bitflags 2.5.0",
+ "cfg-if",
+ "libc",
+ "nix 0.27.1",
+ "thiserror",
+ "userfaultfd-sys",
+]
+
+[[package]]
+name = "userfaultfd"
+>>>>>>> d281ed704 (Firecracker with guest_memfd)
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18d8b176d4d3e420685e964f87c25df5fdd5b26d7eb0d0e7c892d771f5b81035"
@@ -1557,6 +1574,7 @@ dependencies = [
  "vm-fdt",
  "vm-memory",
  "vm-superio",
+ "vmm-sys-util",
  "zerocopy",
 ]
 
