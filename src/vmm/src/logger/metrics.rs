@@ -144,14 +144,23 @@ impl<T: Serialize + Debug> Metrics<T> {
             match serde_json::to_string(&self.app_metrics) {
                 Ok(msg) => {
                     if let Ok(mut guard) = lock.lock() {
-                        // No need to explicitly call flush because the underlying LineWriter
-                        // flushes automatically whenever a newline is
-                        // detected (and we always end with a newline the
-                        // current write).
+                        // Need to call sync_all explicitly to ensure the data reaches the disk.
+                        // This is because we can call this function from the context of a signal
+                        // handler, which exits via `_exit`. This will not flush any I/O-buffers
+                        // that have not reached the disk yet, meaning we
+                        // can potentially lose data.
+                        // Note that `Write::flush` will not do this for us - it only ensures
+                        // the data buffered inside the `LineWriter` has been passed on to a `write`
+                        // syscall, but this happens anyway because we terminate our message with a
+                        // '\n' below.
                         guard
                             .write_all(format!("{msg}\n",).as_bytes())
-                            .map_err(MetricsError::Write)
+                            .map_err(MetricsError::Write)?;
+                        guard
+                            .get_mut()
+                            .sync_all()
                             .map(|_| true)
+                            .map_err(MetricsError::Fsync)
                     } else {
                         // We have not incremented `missed_metrics_count` as there is no way to push
                         // metrics if destination lock got poisoned.
@@ -190,6 +199,8 @@ pub enum MetricsError {
     Serde(String),
     /// Failed to write metrics: {0}
     Write(std::io::Error),
+    /// Failed to sync metrics file: {0}
+    Fsync(std::io::Error),
 }
 
 /// Used for defining new types of metrics that act as a counter (i.e they are continuously updated
