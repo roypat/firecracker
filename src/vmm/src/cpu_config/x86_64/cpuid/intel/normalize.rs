@@ -75,11 +75,6 @@ impl super::IntelCpuid {
         self.update_performance_monitoring_entry()?;
         self.update_brand_string_entry()?;
 
-        // Mask bits related to KVM clock (KVM_CLOCKSOURCE and KVM_CLOCKSOURCE2). Should disable the
-        // pvclock.
-        let kvm_cpuid = self.get_mut(&CpuidKey::leaf(0x40000001)).unwrap();
-        kvm_cpuid.result.eax &= !(1 << 0);
-        kvm_cpuid.result.eax &= !(1 << 3);
         Ok(())
     }
 
