@@ -111,7 +111,6 @@ pub mod vmm_config;
 pub mod vstate;
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::sync::mpsc::RecvTimeoutError;
@@ -319,7 +318,6 @@ pub struct Vmm {
     mmio_device_manager: MMIODeviceManager,
     #[cfg(target_arch = "x86_64")]
     pio_device_manager: PortIODeviceManager,
-    pub guest_memfd: File,
 }
 
 impl Vmm {

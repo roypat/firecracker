@@ -7,3 +7,5 @@ pub mod memory;
 pub mod vcpu;
 /// Module with Vm implementation.
 pub mod vm;
+
+pub mod guest_memfd;
