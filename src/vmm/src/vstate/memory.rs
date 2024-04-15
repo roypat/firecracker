@@ -7,10 +7,9 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd};
 use std::ptr::null_mut;
 
-use kvm_bindings::KVMIO;
 use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 use utils::{errno, get_page_size, u64_to_usize};
@@ -22,12 +21,9 @@ pub use vm_memory::{
     GuestUsize, MemoryRegionAddress, MmapRegion,
 };
 use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
-use vmm_sys_util::ioctl::ioctl_with_ref;
-use vmm_sys_util::syscall::SyscallReturnCode;
-use vmm_sys_util::{ioctl_ioc_nr, ioctl_iowr_nr};
 
 use crate::vmm_config::machine_config::HugePageConfig;
-use crate::{DirtyBitmap, Vm};
+use crate::DirtyBitmap;
 
 /// Type of GuestMemoryMmap.
 pub type GuestMemoryMmap = vm_memory::GuestMemoryMmap<Option<AtomicBitmap>>;
@@ -77,6 +73,7 @@ where
         huge_pages: HugePageConfig,
     ) -> Result<Self, MemoryError>;
 
+    /// Creates a GuestMemoryMmap with `size` in MiB backed by a guest_memfd.
     fn guest_memfd_backed(
         associated_vm: &VmFd,
         mem_size_mib: u64,
@@ -175,7 +172,7 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         associated_vm: &VmFd,
         mem_size_mib: u64,
     ) -> Result<(Self, File), MemoryError> {
-        let guest_memfd = create_guest_memfd(associated_vm, mem_size_mib << 20)?;
+        let guest_memfd = crate::vstate::guest_memfd::create_guest_memfd(associated_vm, mem_size_mib << 20)?;
 
         let mut offset: u64 = 0;
         let regions = crate::arch::arch_memory_regions((mem_size_mib as usize) << 20)
@@ -474,38 +471,6 @@ fn create_memfd(
         .map_err(MemoryError::Memfd)?;
 
     Ok(mem_file)
-}
-
-fn create_guest_memfd(vm: &VmFd, size: u64) -> Result<File, MemoryError> {
-    #[allow(non_camel_case_types)]
-    #[repr(C)]
-    #[derive(Copy, Clone, Default)]
-    pub struct kvm_create_guest_memfd {
-        size: u64,
-        flags: u64,
-        reserved: [u64; 6],
-    }
-
-    /// ioctl to create a guest_memfd. Has to be executed on a vm fd, to which
-    /// the returned guest_memfd will be bound (e.g. it can only be used to back
-    /// memory in that specific VM).
-    ioctl_iowr_nr!(KVM_CREATE_GUEST_MEMFD, KVMIO, 0xd4, kvm_create_guest_memfd);
-
-    let guest_memfd = SyscallReturnCode(unsafe {
-        ioctl_with_ref(
-            vm,
-            KVM_CREATE_GUEST_MEMFD(),
-            &kvm_create_guest_memfd {
-                size,
-                flags: 0,
-                ..Default::default()
-            },
-        )
-    })
-    .into_result()
-    .map_err(MemoryError::GuestMemfd)?;
-
-    unsafe { Ok(File::from_raw_fd(guest_memfd)) }
 }
 
 #[cfg(test)]

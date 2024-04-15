@@ -10,7 +10,6 @@ use std::io::{self, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
 use event_manager::{MutEventSubscriber, SubscriberOps};
-use kvm_bindings::KVMIO;
 use libc::EFD_NONBLOCK;
 use linux_loader::cmdline::Cmdline as LoaderKernelCmdline;
 #[cfg(target_arch = "x86_64")]
@@ -23,13 +22,10 @@ use userfaultfd::Uffd;
 use utils::eventfd::EventFd;
 use utils::time::TimestampUs;
 use utils::u64_to_usize;
-use vm_memory::{Address, GuestMemory, GuestMemoryRegion, ReadVolatile};
+use vm_memory::{GuestMemory, ReadVolatile};
 #[cfg(target_arch = "aarch64")]
 use vm_superio::Rtc;
 use vm_superio::Serial;
-use vmm_sys_util::ioctl::ioctl_with_ref;
-use vmm_sys_util::syscall::SyscallReturnCode;
-use vmm_sys_util::{ioctl_ioc_nr, ioctl_iow_nr};
 
 #[cfg(target_arch = "x86_64")]
 use crate::acpi;
@@ -72,7 +68,7 @@ use crate::snapshot::Persist;
 use crate::vmm_config::boot_source::BootConfig;
 use crate::vmm_config::instance_info::InstanceInfo;
 use crate::vmm_config::machine_config::{VmConfig, VmConfigError};
-use crate::vstate::memory::{GuestAddress, GuestMemoryExtension, GuestMemoryMmap, MemoryError};
+use crate::vstate::memory::{GuestAddress, GuestMemoryExtension, GuestMemoryMmap};
 use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuError};
 use crate::vstate::vm::Vm;
 use crate::{device_manager, mem_size_mib, EventManager, Vmm, VmmError};
@@ -174,6 +170,9 @@ fn create_vmm_and_vcpus(
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
+    // leak the fd to avoid it getting closed by the `File` destructor.
+    std::mem::forget(guest_memfd);
+
     let vcpus_exit_evt = EventFd::new(libc::EFD_NONBLOCK)
         .map_err(VmmError::EventFd)
         .map_err(Internal)?;
@@ -237,7 +236,6 @@ fn create_vmm_and_vcpus(
         // For now, put the private memory here, so that all setup code operates on private memory.
         // Later, we swap it out for the shared one.
         guest_memory: private_memory,
-        guest_memfd,
         uffd,
         vcpus_handles: Vec::new(),
         vcpus_exit_evt,
@@ -274,9 +272,7 @@ pub fn build_microvm_for_boot(
 
     let track_dirty_pages = vm_resources.track_dirty_pages();
 
-    assert!(!track_dirty_pages); // doesn't work with guest_memfd
-
-    let mut shared_memory = GuestMemoryMmap::memfd_backed(
+    let shared_memory = GuestMemoryMmap::memfd_backed(
         vm_resources.vm_config.mem_size_mib,
         track_dirty_pages,
         vm_resources.vm_config.huge_pages,
@@ -294,6 +290,10 @@ pub fn build_microvm_for_boot(
         vm_resources.vm_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
     )?;
+
+    // do not run the destructor, to avoid unmapping it (in case the kernel starts complaining if
+    // the "shared" part of guest_memfd ends up being deallocated).
+    std::mem::forget(shared_memory);
 
     let entry_addr = load_kernel(boot_config, &vmm.guest_memory)?;
     let initrd = load_initrd_from_config(boot_config, &vmm.guest_memory)?;
@@ -350,62 +350,8 @@ pub fn build_microvm_for_boot(
         boot_cmdline,
     )?;
 
-    // All the above operations could do access to guest memory. For this reason, we store the
-    // GuestMemoryMmap that represents the mmap'd guest_memfd inside of `Vmm`. Now, swap it out for
-    // the "shared" one (alternatively, use a bogus one because any access to guest memory after
-    // this swap will never be seen by the guest anyway) so that we can drop the private mapping
-    // (pre-requisite for setting the memory attributes to private, otherwise we get EPERM).
-    //std::mem::swap(&mut vmm.guest_memory, &mut shared_memory);
-    //let private_memory = shared_memory;
-
-    // unmap it again so that we can flip set the attributes to private
-    for region in vmm.guest_memory.iter() {
-        unsafe {
-            libc::munmap(region.as_ptr() as *mut libc::c_void, region.len() as _);
-        }
-    }
-    //drop(private_memory);
-
-    /// Bitflag to mark a specific (range of) page frame(s) as private
-    const KVM_MEMORY_ATTRIBUTE_PRIVATE: u64 = 1u64 << 3;
-
-    #[allow(non_camel_case_types)]
-    #[repr(C)]
-    #[derive(Copy, Clone, Default)]
-    struct kvm_memory_attributes {
-        address: u64,
-        size: u64,
-        attributes: u64,
-        flags: u64,
-    }
-
-    /// VM ioctl used to mark guest page frames as shared/private
-    ioctl_iow_nr!(
-        KVM_SET_MEMORY_ATTRIBUTES,
-        KVMIO,
-        0xd2,
-        kvm_memory_attributes
-    );
-
-    for region in vmm.guest_memory.iter() {
-        let attributes = kvm_memory_attributes {
-            address: region.start_addr().raw_value(),
-            size: region.len(),
-            attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE,
-            ..Default::default()
-        };
-
-        unsafe {
-            SyscallReturnCode(ioctl_with_ref(
-                vmm.vm.fd(),
-                KVM_SET_MEMORY_ATTRIBUTES(),
-                &attributes,
-            ))
-            .into_empty_result()
-            .map_err(MemoryError::SetMemoryAttributes)
-            .map_err(StartMicrovmError::GuestMemory)?
-        }
-    }
+    // After this call, all accesses to guest memory from Firecracker will segfault!
+    vmm.set_guest_memory_private()?;
 
     // Move vcpus to their own threads and start their state machine in the 'Paused' state.
     vmm.start_vcpus(
