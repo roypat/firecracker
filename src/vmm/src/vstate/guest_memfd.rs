@@ -18,7 +18,7 @@ use vmm_sys_util::ioctl_ioc_nr;
 use vmm_sys_util::syscall::SyscallReturnCode;
 use crate::builder::StartMicrovmError;
 use crate::{Vm, Vmm};
-use crate::vstate::memory::{GuestMemoryMmap, GuestRegionMmap, MemoryError};
+use crate::vstate::memory::{GuestRegionMmap, MemoryError};
 use crate::vstate::vm::VmError;
 
 
@@ -107,14 +107,17 @@ pub fn create_guest_memfd(vm: &VmFd, size: u64) -> Result<File, MemoryError> {
 }
 
 impl Vm {
-    pub fn set_userspace_memory_region2(&self, slot: u32, region: &GuestRegionMmap, guest_memfd: &File, shared_memory: &GuestMemoryMmap) -> Result<(), VmError> {
+    pub fn set_userspace_memory_region2(&self, slot: u32, region: &GuestRegionMmap, guest_memfd: &File) -> Result<(), VmError> {
+        // Set the "userspace_addr" to an mmap of the guest_memfd. Since the guest_memfd is mapped
+        // into host userspace, this will trick KVM into gup-ing guest_memfd whenever it thinks
+        // that it is accessing normal guest memory (as KVM's guest memory accessor functions
+        // are not enlightened about the possibility of guest_memfd existing, and will always
+        // gup via userspace_addr).
         let memory_region = kvm_userspace_memory_region2 {
             slot,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len(),
-            // It's safe to unwrap because the guest address is valid.
-            userspace_addr: shared_memory.get_host_address(region.start_addr()).unwrap()
-                as u64,
+            userspace_addr: region.as_ptr() as u64,
             guest_memfd_offset: region.start_addr().raw_value(),
             guest_memfd: guest_memfd.as_raw_fd() as u32,
             flags: KVM_MEM_PRIVATE,
@@ -134,20 +137,7 @@ impl Vm {
 
 impl Vmm {
     pub fn set_guest_memory_private(&self) -> Result<(), StartMicrovmError> {
-        // Unmap guest memory from userspace. Note that this is not a stock-guest_memfd requirement,
-        // but rather a requirement of the specific implementation in the patch series https://lore.kernel.org/all/20240222161047.402609-1-tabba@google.com/
-        // which we use to map guest_memfd into userspace: It requires that it can only be mapped
-        // while the VM is not executing!
-        // We chose this patch series for simplicity of integration with existing Firecracker code,
-        // but the upstream solution for loading guest kernels into guest_memfd will most likely
-        // looks very different: https://lore.kernel.org/kvm/20240404185034.3184582-1-pbonzini@redhat.com/T/#m5c90bd2631f70c9d8c53bc5a9dba6c7119fc9e11
-        for region in self.guest_memory.iter() {
-            unsafe {
-                libc::munmap(region.as_ptr() as *mut libc::c_void, region.len() as _);
-            }
-        }
-
-        for region in self.guest_memory.iter() {
+       for region in self.guest_memory.iter() {
             let attributes = kvm_memory_attributes {
                 address: region.start_addr().raw_value(),
                 size: region.len(),
