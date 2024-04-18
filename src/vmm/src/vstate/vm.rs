@@ -212,14 +212,14 @@ impl Vm {
     /// Initializes the guest memory.
     pub fn memory_init(
         &self,
-        shared_memory: &GuestMemoryMmap,
+        guest_memfd_mmap: &GuestMemoryMmap,
         guest_memfd: &File,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
-        if shared_memory.num_regions() > self.max_memslots {
+        if guest_memfd_mmap.num_regions() > self.max_memslots {
             return Err(VmError::NotEnoughMemorySlots);
         }
-        self.set_kvm_memory_regions(shared_memory, guest_memfd, track_dirty_pages)?;
+        self.set_kvm_memory_regions(guest_memfd_mmap, guest_memfd, track_dirty_pages)?;
         #[cfg(target_arch = "x86_64")]
         self.fd
             .set_tss_address(u64_to_usize(crate::arch::x86_64::layout::KVM_TSS_ADDRESS))
@@ -230,15 +230,15 @@ impl Vm {
 
     pub(crate) fn set_kvm_memory_regions(
         &self,
-        shared_memory: &GuestMemoryMmap,
+        guest_memfd_mmap: &GuestMemoryMmap,
         guest_memfd: &File,
         _track_dirty_pages: bool,
     ) -> Result<(), VmError> {
-        shared_memory
+        guest_memfd_mmap
             .iter()
             .enumerate()
             .try_for_each(|(index, region)| {
-                self.set_userspace_memory_region2(index as u32, region, guest_memfd, shared_memory)
+                self.set_userspace_memory_region2(index as u32, region, guest_memfd)
             })
     }
 

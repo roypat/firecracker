@@ -148,7 +148,7 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 fn create_vmm_and_vcpus(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
-    shared_memory: &GuestMemoryMmap,
+    mem_size_mib: u64,
     uffd: Option<Uffd>,
     track_dirty_pages: bool,
     vcpu_count: u8,
@@ -163,10 +163,10 @@ fn create_vmm_and_vcpus(
         .map_err(StartMicrovmError::Internal)?;
 
     let (private_memory, guest_memfd) =
-        GuestMemoryMmap::guest_memfd_backed(vm.fd(), mem_size_mib(shared_memory))
+        GuestMemoryMmap::guest_memfd_backed(vm.fd(), mem_size_mib)
             .map_err(StartMicrovmError::GuestMemory)?;
 
-    vm.memory_init(shared_memory, &guest_memfd, track_dirty_pages)
+    vm.memory_init(&private_memory, &guest_memfd, track_dirty_pages)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
@@ -233,8 +233,6 @@ fn create_vmm_and_vcpus(
         instance_info: instance_info.clone(),
         shutdown_exit_code: None,
         vm,
-        // For now, put the private memory here, so that all setup code operates on private memory.
-        // Later, we swap it out for the shared one.
         guest_memory: private_memory,
         uffd,
         vcpus_handles: Vec::new(),
@@ -272,28 +270,17 @@ pub fn build_microvm_for_boot(
 
     let track_dirty_pages = vm_resources.track_dirty_pages();
 
-    let shared_memory = GuestMemoryMmap::memfd_backed(
-        vm_resources.vm_config.mem_size_mib,
-        track_dirty_pages,
-        vm_resources.vm_config.huge_pages,
-    )
-    .map_err(StartMicrovmError::GuestMemory)?;
-
     let cpu_template = vm_resources.vm_config.cpu_template.get_cpu_template()?;
 
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
-        &shared_memory,
+        vm_resources.vm_config.mem_size_mib as u64,
         None,
         track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
     )?;
-
-    // do not run the destructor, to avoid unmapping it (in case the kernel starts complaining if
-    // the "shared" part of guest_memfd ends up being deallocated).
-    std::mem::forget(shared_memory);
 
     let entry_addr = load_kernel(boot_config, &vmm.guest_memory)?;
     let initrd = load_initrd_from_config(boot_config, &vmm.guest_memory)?;
@@ -350,7 +337,6 @@ pub fn build_microvm_for_boot(
         boot_cmdline,
     )?;
 
-    // After this call, all accesses to guest memory from Firecracker will segfault!
     vmm.set_guest_memory_private()?;
 
     // Move vcpus to their own threads and start their state machine in the 'Paused' state.
@@ -467,7 +453,7 @@ pub fn build_microvm_from_snapshot(
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
-        &guest_memory,
+        mem_size_mib(&guest_memory),
         uffd,
         vm_resources.vm_config.track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
