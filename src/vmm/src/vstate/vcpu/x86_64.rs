@@ -12,7 +12,7 @@ use kvm_bindings::{
     kvm_debugregs, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
     kvm_xsave, CpuId, Msrs, KVM_MAX_CPUID_ENTRIES, KVM_MAX_MSR_ENTRIES,
 };
-use kvm_ioctls::{VcpuExit, VcpuFd};
+use kvm_ioctls::VcpuExit;
 use log::{error, warn};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,7 @@ use crate::logger::{IncMetric, METRICS};
 use crate::vstate::memory::{Address, GuestAddress, GuestMemoryMmap};
 use crate::vstate::vcpu::{VcpuConfig, VcpuEmulation};
 use crate::vstate::vm::Vm;
+use crate::Vcpu;
 
 // Tolerance for TSC frequency expected variation.
 // The value of 250 parts per million is based on
@@ -137,14 +138,8 @@ pub enum ArchVcpuConfigureError {
 /// A wrapper around creating and using a kvm x86_64 vcpu.
 #[derive(Debug)]
 pub struct ArchVcpu {
-    /// Index of vcpu.
-    pub index: u8,
-    /// KVM vcpu fd.
-    pub fd: VcpuFd,
     /// Pio bus.
     pub pio_bus: Option<crate::devices::Bus>,
-    /// Mmio bus.
-    pub mmio_bus: Option<crate::devices::Bus>,
     msrs_to_save: HashSet<u32>,
 }
 
@@ -155,21 +150,54 @@ impl ArchVcpu {
     ///
     /// * `index` - Represents the 0-based CPU index between [0, max vcpus).
     /// * `vm` - The vm to which this vcpu will get attached.
-    pub fn new(index: u8, vm: &Vm) -> Result<Self, ArchVcpuError> {
-        let kvm_vcpu = vm
-            .fd()
-            .create_vcpu(index.into())
-            .map_err(ArchVcpuError::VcpuFd)?;
-
+    pub fn new(vm: &Vm) -> Result<Self, ArchVcpuError> {
         Ok(ArchVcpu {
-            index,
-            fd: kvm_vcpu,
             pio_bus: None,
-            mmio_bus: None,
             msrs_to_save: vm.msrs_to_save().as_slice().iter().copied().collect(),
         })
     }
 
+    /// Sets a Port Mapped IO bus for this vcpu.
+    pub fn set_pio_bus(&mut self, pio_bus: crate::devices::Bus) {
+        self.pio_bus = Some(pio_bus);
+    }
+
+    /// Runs the vCPU in KVM context and handles the kvm exit reason.
+    ///
+    /// Returns error or enum specifying whether emulation was handled or interrupted.
+    pub fn run_arch_emulation(&self, exit: VcpuExit) -> Result<VcpuEmulation, super::VcpuError> {
+        match exit {
+            VcpuExit::IoIn(addr, data) => {
+                if let Some(pio_bus) = &self.pio_bus {
+                    let _metric = METRICS.vcpu.exit_io_in_agg.record_latency_metrics();
+                    pio_bus.read(u64::from(addr), data);
+                    METRICS.vcpu.exit_io_in.inc();
+                }
+                Ok(VcpuEmulation::Handled)
+            }
+            VcpuExit::IoOut(addr, data) => {
+                if let Some(pio_bus) = &self.pio_bus {
+                    let _metric = METRICS.vcpu.exit_io_out_agg.record_latency_metrics();
+                    pio_bus.write(u64::from(addr), data);
+                    METRICS.vcpu.exit_io_out.inc();
+                }
+                Ok(VcpuEmulation::Handled)
+            }
+            unexpected_exit => {
+                METRICS.vcpu.failures.inc();
+                // TODO: Are we sure we want to finish running a vcpu upon
+                // receiving a vm exit that is not necessarily an error?
+                error!("Unexpected exit reason on vcpu run: {:?}", unexpected_exit);
+                Err(super::VcpuError::UnhandledKvmExit(format!(
+                    "{:?}",
+                    unexpected_exit
+                )))
+            }
+        }
+    }
+}
+
+impl Vcpu {
     /// Configures a x86_64 specific vcpu for booting Linux and should be called once per vcpu.
     ///
     /// # Arguments
@@ -206,7 +234,7 @@ impl ArchVcpu {
 
         // Clone MSR entries that are modified by CPU template from `VcpuConfig`.
         let mut msrs = vcpu_config.cpu_config.msrs.clone();
-        self.msrs_to_save.extend(msrs.keys());
+        self.arch_vcpu.msrs_to_save.extend(msrs.keys());
 
         // Apply MSR modification to comply the linux boot protocol.
         create_boot_msr_entries().into_iter().for_each(|entry| {
@@ -222,7 +250,7 @@ impl ArchVcpu {
         // Since CPUID tells us what features are enabled for the Guest, we can infer
         // the extra MSRs that we need to save based on a dependency map.
         let extra_msrs = cpuid::common::msrs_to_save_by_cpuid(&kvm_cpuid);
-        self.msrs_to_save.extend(extra_msrs);
+        self.arch_vcpu.msrs_to_save.extend(extra_msrs);
 
         // TODO: Some MSRs depend on values of other MSRs. This dependency will need to
         // be implemented.
@@ -247,11 +275,6 @@ impl ArchVcpu {
         crate::arch::x86_64::interrupts::set_lint(&self.fd)?;
 
         Ok(())
-    }
-
-    /// Sets a Port Mapped IO bus for this vcpu.
-    pub fn set_pio_bus(&mut self, pio_bus: crate::devices::Bus) {
-        self.pio_bus = Some(pio_bus);
     }
 
     /// Get the current TSC frequency for this vCPU.
@@ -392,8 +415,14 @@ impl ArchVcpu {
             None
         });
         let cpuid = self.get_cpuid()?;
-        let saved_msrs =
-            self.get_msr_chunks(&self.msrs_to_save.iter().copied().collect::<Vec<_>>())?;
+        let saved_msrs = self.get_msr_chunks(
+            &self
+                .arch_vcpu
+                .msrs_to_save
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+        )?;
         let vcpu_events = self
             .fd
             .get_vcpu_events()
@@ -505,40 +534,6 @@ impl ArchVcpu {
             .map_err(ArchVcpuError::VcpuSetVcpuEvents)?;
         Ok(())
     }
-
-    /// Runs the vCPU in KVM context and handles the kvm exit reason.
-    ///
-    /// Returns error or enum specifying whether emulation was handled or interrupted.
-    pub fn run_arch_emulation(&self, exit: VcpuExit) -> Result<VcpuEmulation, super::VcpuError> {
-        match exit {
-            VcpuExit::IoIn(addr, data) => {
-                if let Some(pio_bus) = &self.pio_bus {
-                    let _metric = METRICS.vcpu.exit_io_in_agg.record_latency_metrics();
-                    pio_bus.read(u64::from(addr), data);
-                    METRICS.vcpu.exit_io_in.inc();
-                }
-                Ok(VcpuEmulation::Handled)
-            }
-            VcpuExit::IoOut(addr, data) => {
-                if let Some(pio_bus) = &self.pio_bus {
-                    let _metric = METRICS.vcpu.exit_io_out_agg.record_latency_metrics();
-                    pio_bus.write(u64::from(addr), data);
-                    METRICS.vcpu.exit_io_out.inc();
-                }
-                Ok(VcpuEmulation::Handled)
-            }
-            unexpected_exit => {
-                METRICS.vcpu.failures.inc();
-                // TODO: Are we sure we want to finish running a vcpu upon
-                // receiving a vm exit that is not necessarily an error?
-                error!("Unexpected exit reason on vcpu run: {:?}", unexpected_exit);
-                Err(super::VcpuError::UnhandledKvmExit(format!(
-                    "{:?}",
-                    unexpected_exit
-                )))
-            }
-        }
-    }
 }
 
 /// Structure holding VCPU kvm state.
@@ -598,6 +593,7 @@ mod tests {
     use std::os::unix::io::AsRawFd;
 
     use kvm_ioctls::Cap;
+    use utils::eventfd::EventFd;
 
     use super::*;
     use crate::arch::x86_64::cpu_model::CpuModel;
@@ -627,10 +623,10 @@ mod tests {
         }
     }
 
-    fn setup_vcpu(mem_size: usize) -> (Vm, ArchVcpu, GuestMemoryMmap) {
+    fn setup_vcpu(mem_size: usize) -> (Vm, Vcpu, GuestMemoryMmap) {
         let (vm, vm_mem) = setup_vm(mem_size);
         vm.setup_irqchip().unwrap();
-        let vcpu = ArchVcpu::new(0, &vm).unwrap();
+        let vcpu = Vcpu::new(0, &vm, EventFd::new(libc::EFD_NONBLOCK).unwrap()).unwrap();
         (vm, vcpu, vm_mem)
     }
 
@@ -647,7 +643,7 @@ mod tests {
 
     fn create_vcpu_config(
         vm: &Vm,
-        vcpu: &ArchVcpu,
+        vcpu: &Vcpu,
         template: &CustomCpuTemplate,
     ) -> Result<VcpuConfig, GuestConfigError> {
         let cpuid = Cpuid::try_from(vm.supported_cpuid().clone())
@@ -674,7 +670,7 @@ mod tests {
             Ok(())
         );
 
-        let try_configure = |vm: &Vm, vcpu: &mut ArchVcpu, template| -> bool {
+        let try_configure = |vm: &Vm, vcpu: &mut Vcpu, template| -> bool {
             let cpu_template = Some(CpuTemplateType::Static(template));
             let template = cpu_template.get_cpu_template();
             match template {
@@ -911,8 +907,15 @@ mod tests {
         // Test `get_msrs()` with the MSR indices that should be serialized into snapshots.
         // The MSR indices should be valid and this test should succeed.
         let (_, vcpu, _) = setup_vcpu(0x1000);
-        vcpu.get_msrs(&vcpu.msrs_to_save.iter().copied().collect::<Vec<_>>())
-            .unwrap();
+        vcpu.get_msrs(
+            &vcpu
+                .arch_vcpu
+                .msrs_to_save
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
     }
 
     #[test]
