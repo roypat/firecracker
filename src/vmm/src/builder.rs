@@ -487,9 +487,9 @@ pub fn build_microvm_from_snapshot(
         if let Some(state_tsc) = microvm_state.vcpu_states[0].tsc_khz {
             // Scale the TSC frequency for all VCPUs. If a TSC frequency is not specified in the
             // snapshot, by default it uses the host frequency.
-            if vcpus[0].kvm_vcpu.is_tsc_scaling_required(state_tsc)? {
+            if vcpus[0].arch_vcpu.is_tsc_scaling_required(state_tsc)? {
                 for vcpu in &vcpus {
-                    vcpu.kvm_vcpu.set_tsc_khz(state_tsc)?;
+                    vcpu.arch_vcpu.set_tsc_khz(state_tsc)?;
                 }
             }
         }
@@ -511,7 +511,7 @@ pub fn build_microvm_from_snapshot(
 
     #[cfg(target_arch = "x86_64")]
     for (vcpu, state) in vcpus.iter_mut().zip(microvm_state.vcpu_states.iter()) {
-        vcpu.kvm_vcpu
+        vcpu.arch_vcpu
             .restore_state(state)
             .map_err(VcpuError::VcpuResponse)
             .map_err(BuildMicrovmFromSnapshotError::RestoreVcpus)?;
@@ -779,7 +779,7 @@ pub fn configure_system_for_boot(
             .map_err(GuestConfigError::CpuidFromKvmCpuid)?;
         let msr_index_list = cpu_template.get_msr_index_list();
         let msrs = vcpus[0]
-            .kvm_vcpu
+            .arch_vcpu
             .get_msrs(&msr_index_list)
             .map_err(GuestConfigError::VcpuIoctl)?;
         CpuConfiguration { cpuid, msrs }
@@ -814,7 +814,7 @@ pub fn configure_system_for_boot(
 
     // Configure vCPUs with normalizing and setting the generated CPU configuration.
     for vcpu in vcpus.iter_mut() {
-        vcpu.kvm_vcpu
+        vcpu.arch_vcpu
             .configure(vmm.guest_memory(), entry_addr, &vcpu_config)
             .map_err(VmmError::VcpuConfigure)
             .map_err(Internal)?;

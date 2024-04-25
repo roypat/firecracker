@@ -129,7 +129,7 @@ use utils::epoll::EventSet;
 use utils::eventfd::EventFd;
 use utils::terminal::Terminal;
 use utils::u64_to_usize;
-use vstate::vcpu::{self, KvmVcpuConfigureError, StartThreadedError, VcpuSendEventError};
+use vstate::vcpu::{self, ArchVcpuConfigureError, StartThreadedError, VcpuSendEventError};
 
 use crate::arch::DeviceType;
 use crate::cpu_config::templates::CpuConfiguration;
@@ -233,7 +233,7 @@ pub enum VmmError {
     /// Error creating timer fd: {0}
     TimerFd(io::Error),
     /// Error configuring the vcpu for boot: {0}
-    VcpuConfigure(KvmVcpuConfigureError),
+    VcpuConfigure(ArchVcpuConfigureError),
     /// Error creating the vcpu: {0}
     VcpuCreate(vstate::vcpu::VcpuError),
     /// Cannot send event to vCPU. {0}
@@ -242,7 +242,7 @@ pub enum VmmError {
     VcpuHandle(vstate::vcpu::VcpuError),
     #[cfg(target_arch = "aarch64")]
     /// Error initializing the vcpu: {0}
-    VcpuInit(vstate::vcpu::KvmVcpuError),
+    VcpuInit(vstate::vcpu::ArchVcpuError),
     /// Failed to start vCPUs
     VcpuStart(StartVcpusError),
     /// Failed to pause the vCPUs.
@@ -390,7 +390,7 @@ impl Vmm {
         for mut vcpu in vcpus.drain(..) {
             vcpu.set_mmio_bus(self.mmio_device_manager.bus.clone());
             #[cfg(target_arch = "x86_64")]
-            vcpu.kvm_vcpu
+            vcpu.arch_vcpu
                 .set_pio_bus(self.pio_device_manager.io_bus.clone());
 
             self.vcpus_handles

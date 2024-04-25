@@ -25,7 +25,7 @@ use crate::vstate::vm::Vm;
 
 /// Errors associated with the wrappers over KVM ioctls.
 #[derive(Debug, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
-pub enum KvmVcpuError {
+pub enum ArchVcpuError {
     /// Error configuring the vcpu registers: {0}
     ConfigureRegisters(ArchError),
     /// Error creating vcpu: {0}
@@ -44,12 +44,12 @@ pub enum KvmVcpuError {
     SaveState(ArchError),
 }
 
-/// Error type for [`KvmVcpu::configure`].
-pub type KvmVcpuConfigureError = KvmVcpuError;
+/// Error type for [`ArchVcpu::configure`].
+pub type ArchVcpuConfigureError = ArchVcpuError;
 
 /// A wrapper around creating and using a kvm aarch64 vcpu.
 #[derive(Debug)]
-pub struct KvmVcpu {
+pub struct ArchVcpu {
     /// Index of vcpu.
     pub index: u8,
     /// KVM vcpu fd.
@@ -60,20 +60,20 @@ pub struct KvmVcpu {
     kvi: Option<kvm_bindings::kvm_vcpu_init>,
 }
 
-impl KvmVcpu {
+impl ArchVcpu {
     /// Constructs a new kvm vcpu with arch specific functionality.
     ///
     /// # Arguments
     ///
     /// * `index` - Represents the 0-based CPU index between [0, max vcpus).
     /// * `vm` - The vm to which this vcpu will get attached.
-    pub fn new(index: u8, vm: &Vm) -> Result<Self, KvmVcpuError> {
+    pub fn new(index: u8, vm: &Vm) -> Result<Self, ArchVcpuError> {
         let kvm_vcpu = vm
             .fd()
             .create_vcpu(index.into())
-            .map_err(KvmVcpuError::CreateVcpu)?;
+            .map_err(ArchVcpuError::CreateVcpu)?;
 
-        Ok(KvmVcpu {
+        Ok(ArchVcpu {
             index,
             fd: kvm_vcpu,
             mmio_bus: None,
@@ -99,11 +99,11 @@ impl KvmVcpu {
         guest_mem: &GuestMemoryMmap,
         kernel_load_addr: GuestAddress,
         vcpu_config: &VcpuConfig,
-    ) -> Result<(), KvmVcpuError> {
+    ) -> Result<(), ArchVcpuError> {
         for reg in vcpu_config.cpu_config.regs.iter() {
-            self.fd
-                .set_one_reg(reg.id, reg.as_slice())
-                .map_err(|err| KvmVcpuError::ApplyCpuTemplate(ArchError::SetOneReg(reg.id, err)))?;
+            self.fd.set_one_reg(reg.id, reg.as_slice()).map_err(|err| {
+                ArchVcpuError::ApplyCpuTemplate(ArchError::SetOneReg(reg.id, err))
+            })?;
         }
 
         setup_boot_regs(
@@ -112,9 +112,9 @@ impl KvmVcpu {
             kernel_load_addr.raw_value(),
             guest_mem,
         )
-        .map_err(KvmVcpuError::ConfigureRegisters)?;
+        .map_err(ArchVcpuError::ConfigureRegisters)?;
 
-        self.mpidr = get_mpidr(&self.fd).map_err(KvmVcpuError::ConfigureRegisters)?;
+        self.mpidr = get_mpidr(&self.fd).map_err(ArchVcpuError::ConfigureRegisters)?;
 
         Ok(())
     }
@@ -128,7 +128,7 @@ impl KvmVcpu {
         &mut self,
         vm_fd: &VmFd,
         vcpu_features: &[VcpuFeatures],
-    ) -> Result<(), KvmVcpuError> {
+    ) -> Result<(), ArchVcpuError> {
         let mut kvi = Self::default_kvi(vm_fd, self.index)?;
 
         for feature in vcpu_features.iter() {
@@ -152,12 +152,12 @@ impl KvmVcpu {
     pub fn default_kvi(
         vm_fd: &VmFd,
         index: u8,
-    ) -> Result<kvm_bindings::kvm_vcpu_init, KvmVcpuError> {
+    ) -> Result<kvm_bindings::kvm_vcpu_init, ArchVcpuError> {
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
         // This reads back the kernel's preferred target type.
         vm_fd
             .get_preferred_target(&mut kvi)
-            .map_err(KvmVcpuError::GetPreferredTarget)?;
+            .map_err(ArchVcpuError::GetPreferredTarget)?;
         // We already checked that the capability is supported.
         kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
 
@@ -170,19 +170,19 @@ impl KvmVcpu {
     }
 
     /// Save the KVM internal state.
-    pub fn save_state(&self) -> Result<VcpuState, KvmVcpuError> {
+    pub fn save_state(&self) -> Result<VcpuState, ArchVcpuError> {
         let mut state = VcpuState {
-            mp_state: get_mpstate(&self.fd).map_err(KvmVcpuError::SaveState)?,
+            mp_state: get_mpstate(&self.fd).map_err(ArchVcpuError::SaveState)?,
             ..Default::default()
         };
-        get_all_registers(&self.fd, &mut state.regs).map_err(KvmVcpuError::SaveState)?;
-        state.mpidr = get_mpidr(&self.fd).map_err(KvmVcpuError::SaveState)?;
+        get_all_registers(&self.fd, &mut state.regs).map_err(ArchVcpuError::SaveState)?;
+        state.mpidr = get_mpidr(&self.fd).map_err(ArchVcpuError::SaveState)?;
         state.kvi = self.kvi;
         Ok(state)
     }
 
     /// Use provided state to populate KVM internal state.
-    pub fn restore_state(&mut self, vm_fd: &VmFd, state: &VcpuState) -> Result<(), KvmVcpuError> {
+    pub fn restore_state(&mut self, vm_fd: &VmFd, state: &VcpuState) -> Result<(), ArchVcpuError> {
         let kvi = match state.kvi {
             Some(kvi) => kvi,
             None => Self::default_kvi(vm_fd, self.index)?,
@@ -198,7 +198,7 @@ impl KvmVcpu {
             .iter()
             .find(|reg| reg.id == KVM_REG_ARM64_SVE_VLS)
         {
-            set_register(&self.fd, sve_vls_reg).map_err(KvmVcpuError::RestoreState)?;
+            set_register(&self.fd, sve_vls_reg).map_err(ArchVcpuError::RestoreState)?;
         }
 
         self.finalize_vcpu(&kvi)?;
@@ -210,18 +210,18 @@ impl KvmVcpu {
             .iter()
             .filter(|reg| reg.id != KVM_REG_ARM64_SVE_VLS)
         {
-            set_register(&self.fd, reg).map_err(KvmVcpuError::RestoreState)?;
+            set_register(&self.fd, reg).map_err(ArchVcpuError::RestoreState)?;
         }
-        set_mpstate(&self.fd, state.mp_state).map_err(KvmVcpuError::RestoreState)?;
+        set_mpstate(&self.fd, state.mp_state).map_err(ArchVcpuError::RestoreState)?;
         Ok(())
     }
 
     /// Dumps CPU configuration.
-    pub fn dump_cpu_config(&self) -> Result<CpuConfiguration, KvmVcpuError> {
-        let reg_list = get_all_registers_ids(&self.fd).map_err(KvmVcpuError::DumpCpuConfig)?;
+    pub fn dump_cpu_config(&self) -> Result<CpuConfiguration, ArchVcpuError> {
+        let reg_list = get_all_registers_ids(&self.fd).map_err(ArchVcpuError::DumpCpuConfig)?;
 
         let mut regs = Aarch64RegisterVec::default();
-        get_registers(&self.fd, &reg_list, &mut regs).map_err(KvmVcpuError::DumpCpuConfig)?;
+        get_registers(&self.fd, &reg_list, &mut regs).map_err(ArchVcpuError::DumpCpuConfig)?;
 
         Ok(CpuConfiguration { regs })
     }
@@ -238,14 +238,14 @@ impl KvmVcpu {
     }
 
     /// Initializes internal vcpufd.
-    fn init_vcpu(&self, kvi: &kvm_bindings::kvm_vcpu_init) -> Result<(), KvmVcpuError> {
-        self.fd.vcpu_init(kvi).map_err(KvmVcpuError::Init)?;
+    fn init_vcpu(&self, kvi: &kvm_bindings::kvm_vcpu_init) -> Result<(), ArchVcpuError> {
+        self.fd.vcpu_init(kvi).map_err(ArchVcpuError::Init)?;
         Ok(())
     }
 
     /// Checks for SVE feature and calls `vcpu_finalize` if
     /// it is enabled.
-    fn finalize_vcpu(&self, kvi: &kvm_bindings::kvm_vcpu_init) -> Result<(), KvmVcpuError> {
+    fn finalize_vcpu(&self, kvi: &kvm_bindings::kvm_vcpu_init) -> Result<(), ArchVcpuError> {
         if (kvi.features[0] & (1 << kvm_bindings::KVM_ARM_VCPU_SVE)) != 0 {
             // KVM_ARM_VCPU_SVE has value 4 so casting to i32 is safe.
             #[allow(clippy::cast_possible_wrap)]
@@ -311,9 +311,9 @@ mod tests {
     use crate::vstate::vm::tests::setup_vm;
     use crate::vstate::vm::Vm;
 
-    fn setup_vcpu(mem_size: usize) -> (Vm, KvmVcpu, GuestMemoryMmap) {
+    fn setup_vcpu(mem_size: usize) -> (Vm, ArchVcpu, GuestMemoryMmap) {
         let (mut vm, vm_mem) = setup_vm(mem_size);
-        let mut vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let mut vcpu = ArchVcpu::new(0, &vm).unwrap();
         vcpu.init(vm.fd(), &[]).unwrap();
         vm.setup_irqchip(1).unwrap();
 
@@ -326,7 +326,7 @@ mod tests {
 
         unsafe { libc::close(vm.fd().as_raw_fd()) };
 
-        let err = KvmVcpu::new(0, &vm);
+        let err = ArchVcpu::new(0, &vm);
         assert_eq!(
             err.err().unwrap().to_string(),
             "Error creating vcpu: Bad file descriptor (os error 9)".to_string()
@@ -358,7 +358,7 @@ mod tests {
         );
         assert_eq!(
             err.unwrap_err(),
-            KvmVcpuError::ConfigureRegisters(ArchError::SetOneReg(
+            ArchVcpuError::ConfigureRegisters(ArchError::SetOneReg(
                 0x6030000000100042,
                 kvm_ioctls::Error::new(9)
             ))
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn test_init_vcpu() {
         let (mut vm, _vm_mem) = setup_vm(0x1000);
-        let mut vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let mut vcpu = ArchVcpu::new(0, &vm).unwrap();
         vm.setup_irqchip(1).unwrap();
 
         // KVM_ARM_VCPU_PSCI_0_2 is set by default.
@@ -402,14 +402,14 @@ mod tests {
     #[test]
     fn test_vcpu_save_restore_state() {
         let (mut vm, _vm_mem) = setup_vm(0x1000);
-        let mut vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let mut vcpu = ArchVcpu::new(0, &vm).unwrap();
         vm.setup_irqchip(1).unwrap();
 
         // Calling KVM_GET_REGLIST before KVM_VCPU_INIT will result in error.
         let res = vcpu.save_state();
         assert!(matches!(
             res.unwrap_err(),
-            KvmVcpuError::SaveState(ArchError::GetRegList(_))
+            ArchVcpuError::SaveState(ArchError::GetRegList(_))
         ));
 
         // Try to restore the register using a faulty state.
@@ -424,7 +424,7 @@ mod tests {
         let res = vcpu.restore_state(vm.fd(), &faulty_vcpu_state);
         assert!(matches!(
             res.unwrap_err(),
-            KvmVcpuError::RestoreState(ArchError::SetOneReg(0, _))
+            ArchVcpuError::RestoreState(ArchError::SetOneReg(0, _))
         ));
 
         vcpu.init(vm.fd(), &[]).unwrap();
@@ -441,7 +441,7 @@ mod tests {
         // This should fail with ENOEXEC.
         // https://elixir.bootlin.com/linux/v5.10.176/source/arch/arm64/kvm/arm.c#L1165
         let (mut vm, _vm_mem) = setup_vm(0x1000);
-        let vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let vcpu = ArchVcpu::new(0, &vm).unwrap();
         vm.setup_irqchip(1).unwrap();
 
         vcpu.dump_cpu_config().unwrap_err();
@@ -451,7 +451,7 @@ mod tests {
     fn test_dump_cpu_config_after_init() {
         // Test `dump_cpu_config()` after `KVM_VCPU_INIT`.
         let (mut vm, _vm_mem) = setup_vm(0x1000);
-        let mut vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let mut vcpu = ArchVcpu::new(0, &vm).unwrap();
         vm.setup_irqchip(1).unwrap();
         vcpu.init(vm.fd(), &[]).unwrap();
 
@@ -461,9 +461,9 @@ mod tests {
     #[test]
     fn test_setup_non_boot_vcpu() {
         let (vm, _) = setup_vm(0x1000);
-        let mut vcpu1 = KvmVcpu::new(0, &vm).unwrap();
+        let mut vcpu1 = ArchVcpu::new(0, &vm).unwrap();
         vcpu1.init(vm.fd(), &[]).unwrap();
-        let mut vcpu2 = KvmVcpu::new(1, &vm).unwrap();
+        let mut vcpu2 = ArchVcpu::new(1, &vm).unwrap();
         vcpu2.init(vm.fd(), &[]).unwrap();
     }
 

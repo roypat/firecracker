@@ -34,7 +34,7 @@ const TSC_KHZ_TOL_DENOMINATOR: u32 = 1_000_000;
 
 /// Errors associated with the wrappers over KVM ioctls.
 #[derive(Debug, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
-pub enum KvmVcpuError {
+pub enum ArchVcpuError {
     /// Failed to convert `kvm_bindings::CpuId` to `Cpuid`: {0}
     ConvertCpuidType(#[from] cpuid::CpuidTryFromKvmCpuid),
     /// Failed FamStructWrapper operation: {0}
@@ -103,19 +103,19 @@ pub enum KvmVcpuError {
     VcpuTemplateError,
 }
 
-/// Error type for [`KvmVcpu::get_tsc_khz`] and [`KvmVcpu::is_tsc_scaling_required`].
+/// Error type for [`ArchVcpu::get_tsc_khz`] and [`ArchVcpu::is_tsc_scaling_required`].
 #[derive(Debug, thiserror::Error, derive_more::From, Eq, PartialEq)]
 #[error("{0}")]
 pub struct GetTscError(utils::errno::Error);
 
-/// Error type for [`KvmVcpu::set_tsc_khz`].
+/// Error type for [`ArchVcpu::set_tsc_khz`].
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
 #[error("{0}")]
 pub struct SetTscError(#[from] kvm_ioctls::Error);
 
-/// Error type for [`KvmVcpu::configure`].
+/// Error type for [`ArchVcpu::configure`].
 #[derive(Debug, thiserror::Error, displaydoc::Display, Eq, PartialEq)]
-pub enum KvmVcpuConfigureError {
+pub enum ArchVcpuConfigureError {
     /// Failed to convert `Cpuid` to `kvm_bindings::CpuId`: {0}
     ConvertCpuidType(#[from] utils::fam::Error),
     /// Failed to apply modifications to CPUID: {0}
@@ -136,7 +136,7 @@ pub enum KvmVcpuConfigureError {
 
 /// A wrapper around creating and using a kvm x86_64 vcpu.
 #[derive(Debug)]
-pub struct KvmVcpu {
+pub struct ArchVcpu {
     /// Index of vcpu.
     pub index: u8,
     /// KVM vcpu fd.
@@ -148,20 +148,20 @@ pub struct KvmVcpu {
     msrs_to_save: HashSet<u32>,
 }
 
-impl KvmVcpu {
+impl ArchVcpu {
     /// Constructs a new kvm vcpu with arch specific functionality.
     ///
     /// # Arguments
     ///
     /// * `index` - Represents the 0-based CPU index between [0, max vcpus).
     /// * `vm` - The vm to which this vcpu will get attached.
-    pub fn new(index: u8, vm: &Vm) -> Result<Self, KvmVcpuError> {
+    pub fn new(index: u8, vm: &Vm) -> Result<Self, ArchVcpuError> {
         let kvm_vcpu = vm
             .fd()
             .create_vcpu(index.into())
-            .map_err(KvmVcpuError::VcpuFd)?;
+            .map_err(ArchVcpuError::VcpuFd)?;
 
-        Ok(KvmVcpu {
+        Ok(ArchVcpu {
             index,
             fd: kvm_vcpu,
             pio_bus: None,
@@ -183,7 +183,7 @@ impl KvmVcpu {
         guest_mem: &GuestMemoryMmap,
         kernel_start_addr: GuestAddress,
         vcpu_config: &VcpuConfig,
-    ) -> Result<(), KvmVcpuConfigureError> {
+    ) -> Result<(), ArchVcpuConfigureError> {
         let mut cpuid = vcpu_config.cpu_config.cpuid.clone();
 
         // Apply machine specific changes to CPUID.
@@ -202,7 +202,7 @@ impl KvmVcpu {
         // Set CPUID in the KVM
         self.fd
             .set_cpuid2(&kvm_cpuid)
-            .map_err(KvmVcpuConfigureError::SetCpuid)?;
+            .map_err(ArchVcpuConfigureError::SetCpuid)?;
 
         // Clone MSR entries that are modified by CPU template from `VcpuConfig`.
         let mut msrs = vcpu_config.cpu_config.msrs.clone();
@@ -273,11 +273,11 @@ impl KvmVcpu {
     /// # Errors
     ///
     /// * When [`kvm_ioctls::VcpuFd::get_cpuid2`] returns errors.
-    fn get_cpuid(&self) -> Result<kvm_bindings::CpuId, KvmVcpuError> {
+    fn get_cpuid(&self) -> Result<kvm_bindings::CpuId, ArchVcpuError> {
         let mut cpuid = self
             .fd
             .get_cpuid2(KVM_MAX_CPUID_ENTRIES)
-            .map_err(KvmVcpuError::VcpuGetCpuid)?;
+            .map_err(ArchVcpuError::VcpuGetCpuid)?;
 
         // As CPUID.0h:EAX should have the largest CPUID standard function, we don't need to check
         // EBX, ECX and EDX to confirm whether it is a valid entry.
@@ -304,7 +304,7 @@ impl KvmVcpu {
     /// * When [`kvm_ioctls::VcpuFd::get_msrs`] returns errors.
     /// * When the return value of [`kvm_ioctls::VcpuFd::get_msrs`] (the number of entries that
     ///   could be gotten) is less than expected.
-    fn get_msr_chunks(&self, msr_index_list: &[u32]) -> Result<Vec<Msrs>, KvmVcpuError> {
+    fn get_msr_chunks(&self, msr_index_list: &[u32]) -> Result<Vec<Msrs>, ArchVcpuError> {
         let mut msr_chunks: Vec<Msrs> = Vec::new();
 
         for msr_index_chunk in msr_index_list.chunks(KVM_MAX_MSR_ENTRIES) {
@@ -319,9 +319,9 @@ impl KvmVcpu {
             let nmsrs = self
                 .fd
                 .get_msrs(&mut msrs)
-                .map_err(KvmVcpuError::VcpuGetMsrs)?;
+                .map_err(ArchVcpuError::VcpuGetMsrs)?;
             if nmsrs != expected_nmsrs {
-                return Err(KvmVcpuError::VcpuGetMsr(msr_index_chunk[nmsrs]));
+                return Err(ArchVcpuError::VcpuGetMsr(msr_index_chunk[nmsrs]));
             }
 
             msr_chunks.push(msrs);
@@ -338,8 +338,8 @@ impl KvmVcpu {
     ///
     /// # Errors
     ///
-    /// * When `KvmVcpu::get_msr_chunks()` returns errors.
-    pub fn get_msrs(&self, msr_index_list: &[u32]) -> Result<HashMap<u32, u64>, KvmVcpuError> {
+    /// * When `ArchVcpu::get_msr_chunks()` returns errors.
+    pub fn get_msrs(&self, msr_index_list: &[u32]) -> Result<HashMap<u32, u64>, ArchVcpuError> {
         let mut msrs: HashMap<u32, u64> = HashMap::new();
         self.get_msr_chunks(msr_index_list)?
             .iter()
@@ -352,7 +352,7 @@ impl KvmVcpu {
     }
 
     /// Save the KVM internal state.
-    pub fn save_state(&self) -> Result<VcpuState, KvmVcpuError> {
+    pub fn save_state(&self) -> Result<VcpuState, ArchVcpuError> {
         // Ordering requirements:
         //
         // KVM_GET_MP_STATE calls kvm_apic_accept_events(), which might modify
@@ -374,16 +374,16 @@ impl KvmVcpu {
         let mp_state = self
             .fd
             .get_mp_state()
-            .map_err(KvmVcpuError::VcpuGetMpState)?;
-        let regs = self.fd.get_regs().map_err(KvmVcpuError::VcpuGetRegs)?;
-        let sregs = self.fd.get_sregs().map_err(KvmVcpuError::VcpuGetSregs)?;
-        let xsave = self.fd.get_xsave().map_err(KvmVcpuError::VcpuGetXsave)?;
-        let xcrs = self.fd.get_xcrs().map_err(KvmVcpuError::VcpuGetXcrs)?;
+            .map_err(ArchVcpuError::VcpuGetMpState)?;
+        let regs = self.fd.get_regs().map_err(ArchVcpuError::VcpuGetRegs)?;
+        let sregs = self.fd.get_sregs().map_err(ArchVcpuError::VcpuGetSregs)?;
+        let xsave = self.fd.get_xsave().map_err(ArchVcpuError::VcpuGetXsave)?;
+        let xcrs = self.fd.get_xcrs().map_err(ArchVcpuError::VcpuGetXcrs)?;
         let debug_regs = self
             .fd
             .get_debug_regs()
-            .map_err(KvmVcpuError::VcpuGetDebugRegs)?;
-        let lapic = self.fd.get_lapic().map_err(KvmVcpuError::VcpuGetLapic)?;
+            .map_err(ArchVcpuError::VcpuGetDebugRegs)?;
+        let lapic = self.fd.get_lapic().map_err(ArchVcpuError::VcpuGetLapic)?;
         let tsc_khz = self.get_tsc_khz().ok().or_else(|| {
             // v0.25 and newer snapshots without TSC will only work on
             // the same CPU model as the host on which they were taken.
@@ -397,7 +397,7 @@ impl KvmVcpu {
         let vcpu_events = self
             .fd
             .get_vcpu_events()
-            .map_err(KvmVcpuError::VcpuGetVcpuEvents)?;
+            .map_err(ArchVcpuError::VcpuGetVcpuEvents)?;
 
         Ok(VcpuState {
             cpuid,
@@ -418,7 +418,7 @@ impl KvmVcpu {
     ///
     /// Opposed to `save_state()`, this dumps all the supported and dumpable MSRs not limited to
     /// serializable ones.
-    pub fn dump_cpu_config(&self) -> Result<CpuConfiguration, KvmVcpuError> {
+    pub fn dump_cpu_config(&self) -> Result<CpuConfiguration, ArchVcpuError> {
         let cpuid = cpuid::Cpuid::try_from(self.get_cpuid()?)?;
         let kvm = kvm_ioctls::Kvm::new().unwrap();
         let msr_index_list = crate::arch::x86_64::msr::get_msrs_to_dump(&kvm)?;
@@ -448,7 +448,7 @@ impl KvmVcpu {
     }
 
     /// Use provided state to populate KVM internal state.
-    pub fn restore_state(&self, state: &VcpuState) -> Result<(), KvmVcpuError> {
+    pub fn restore_state(&self, state: &VcpuState) -> Result<(), ArchVcpuError> {
         // Ordering requirements:
         //
         // KVM_GET_VCPU_EVENTS/KVM_SET_VCPU_EVENTS is unsafe if other vCPUs are
@@ -472,37 +472,37 @@ impl KvmVcpu {
 
         self.fd
             .set_cpuid2(&state.cpuid)
-            .map_err(KvmVcpuError::VcpuSetCpuid)?;
+            .map_err(ArchVcpuError::VcpuSetCpuid)?;
         self.fd
             .set_mp_state(state.mp_state)
-            .map_err(KvmVcpuError::VcpuSetMpState)?;
+            .map_err(ArchVcpuError::VcpuSetMpState)?;
         self.fd
             .set_regs(&state.regs)
-            .map_err(KvmVcpuError::VcpuSetRegs)?;
+            .map_err(ArchVcpuError::VcpuSetRegs)?;
         self.fd
             .set_sregs(&state.sregs)
-            .map_err(KvmVcpuError::VcpuSetSregs)?;
+            .map_err(ArchVcpuError::VcpuSetSregs)?;
         self.fd
             .set_xsave(&state.xsave)
-            .map_err(KvmVcpuError::VcpuSetXsave)?;
+            .map_err(ArchVcpuError::VcpuSetXsave)?;
         self.fd
             .set_xcrs(&state.xcrs)
-            .map_err(KvmVcpuError::VcpuSetXcrs)?;
+            .map_err(ArchVcpuError::VcpuSetXcrs)?;
         self.fd
             .set_debug_regs(&state.debug_regs)
-            .map_err(KvmVcpuError::VcpuSetDebugRegs)?;
+            .map_err(ArchVcpuError::VcpuSetDebugRegs)?;
         self.fd
             .set_lapic(&state.lapic)
-            .map_err(KvmVcpuError::VcpuSetLapic)?;
+            .map_err(ArchVcpuError::VcpuSetLapic)?;
         for msrs in &state.saved_msrs {
-            let nmsrs = self.fd.set_msrs(msrs).map_err(KvmVcpuError::VcpuSetMsrs)?;
+            let nmsrs = self.fd.set_msrs(msrs).map_err(ArchVcpuError::VcpuSetMsrs)?;
             if nmsrs < msrs.as_fam_struct_ref().nmsrs as usize {
-                return Err(KvmVcpuError::VcpuSetMsrsIncomplete);
+                return Err(ArchVcpuError::VcpuSetMsrsIncomplete);
             }
         }
         self.fd
             .set_vcpu_events(&state.vcpu_events)
-            .map_err(KvmVcpuError::VcpuSetVcpuEvents)?;
+            .map_err(ArchVcpuError::VcpuSetVcpuEvents)?;
         Ok(())
     }
 
@@ -627,10 +627,10 @@ mod tests {
         }
     }
 
-    fn setup_vcpu(mem_size: usize) -> (Vm, KvmVcpu, GuestMemoryMmap) {
+    fn setup_vcpu(mem_size: usize) -> (Vm, ArchVcpu, GuestMemoryMmap) {
         let (vm, vm_mem) = setup_vm(mem_size);
         vm.setup_irqchip().unwrap();
-        let vcpu = KvmVcpu::new(0, &vm).unwrap();
+        let vcpu = ArchVcpu::new(0, &vm).unwrap();
         (vm, vcpu, vm_mem)
     }
 
@@ -647,7 +647,7 @@ mod tests {
 
     fn create_vcpu_config(
         vm: &Vm,
-        vcpu: &KvmVcpu,
+        vcpu: &ArchVcpu,
         template: &CustomCpuTemplate,
     ) -> Result<VcpuConfig, GuestConfigError> {
         let cpuid = Cpuid::try_from(vm.supported_cpuid().clone())
@@ -674,7 +674,7 @@ mod tests {
             Ok(())
         );
 
-        let try_configure = |vm: &Vm, vcpu: &mut KvmVcpu, template| -> bool {
+        let try_configure = |vm: &Vm, vcpu: &mut ArchVcpu, template| -> bool {
             let cpu_template = Some(CpuTemplateType::Static(template));
             let template = cpu_template.get_cpu_template();
             match template {
@@ -825,11 +825,11 @@ mod tests {
         // `KVM_GET_CPUID2` returns the result of `KVM_SET_CPUID2`. See
         // https://docs.kernel.org/virt/kvm/api.html#kvm-set-cpuid
         // Since `KVM_SET_CPUID2` has not been called before vcpu configuration, all leaves should
-        // be filled with zero. Therefore, `KvmVcpu::dump_cpu_config()` should fail with CPUID type
+        // be filled with zero. Therefore, `ArchVcpu::dump_cpu_config()` should fail with CPUID type
         // conversion error due to the lack of brand string info in leaf 0x0.
         let (_, vcpu, _) = setup_vcpu(0x10000);
         match vcpu.dump_cpu_config() {
-            Err(KvmVcpuError::ConvertCpuidType(_)) => (),
+            Err(ArchVcpuError::ConvertCpuidType(_)) => (),
             Err(err) => panic!("Unexpected error: {err}"),
             Ok(_) => panic!("Dumping CPU configuration should fail before vcpu configuration."),
         }
@@ -934,10 +934,10 @@ mod tests {
         let (_, vcpu, _) = setup_vcpu(0x1000);
         let msr_index_list: Vec<u32> = vec![2, 3, 4];
         match vcpu.get_msrs(&msr_index_list) {
-            Err(KvmVcpuError::VcpuGetMsr(_)) => (),
+            Err(ArchVcpuError::VcpuGetMsr(_)) => (),
             Err(err) => panic!("Unexpected error: {err}"),
             Ok(_) => {
-                panic!("KvmVcpu::get_msrs() for unsupported MSRs should fail with VcpuGetMsr.")
+                panic!("ArchVcpu::get_msrs() for unsupported MSRs should fail with VcpuGetMsr.")
             }
         }
     }

@@ -26,7 +26,7 @@ pub enum CpuConfigurationError {
     /// Can create cpuid from raw: {0}
     CpuidFromKvmCpuid(crate::cpu_config::x86_64::cpuid::CpuidTryFromKvmCpuid),
     /// KVM vcpu ioctl failed: {0}
-    VcpuIoctl(crate::vstate::vcpu::KvmVcpuError),
+    VcpuIoctl(crate::vstate::vcpu::ArchVcpuError),
 }
 
 /// CPU configuration for x86_64 CPUs
