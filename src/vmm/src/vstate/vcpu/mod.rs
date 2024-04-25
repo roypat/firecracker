@@ -429,15 +429,6 @@ impl Vcpu {
         StateMachine::finish()
     }
 
-    #[cfg(not(test))]
-    /// Calls `KVM_RUN` with this [`Vcpu`]'s underlying file descriptor.
-    ///
-    /// Blocks until a `VM_EXIT` is received, in which case this function returns a [`VcpuExit`]
-    /// containing the reason.
-    pub fn emulate(&self) -> Result<VcpuExit, errno::Error> {
-        self.fd.run()
-    }
-
     /// Runs the vCPU in KVM context and handles the kvm exit reason.
     ///
     /// Returns error or enum specifying whether emulation was handled or interrupted.
@@ -447,7 +438,7 @@ impl Vcpu {
             self.fd.set_kvm_immediate_exit(0);
             return Ok(VcpuEmulation::Interrupted);
         }
-        match self.emulate() {
+        match emulate(&mut self.fd) {
             Ok(run) => match run {
                 VcpuExit::MmioRead(addr, data) => {
                     if let Some(mmio_bus) = &self.mmio_bus {
@@ -556,6 +547,15 @@ impl Drop for Vcpu {
     fn drop(&mut self) {
         let _ = self.reset_thread_local_data();
     }
+}
+
+#[cfg(not(test))]
+/// Calls `KVM_RUN` on the given [`VcpuFd`]
+///
+/// Blocks until a `VM_EXIT` is received, in which case this function returns a [`VcpuExit`]
+/// containing the reason.
+pub fn emulate(fd: &mut VcpuFd) -> Result<VcpuExit, errno::Error> {
+    fd.run()
 }
 
 /// List of events that the Vcpu can receive.
