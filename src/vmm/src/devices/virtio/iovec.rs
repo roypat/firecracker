@@ -156,7 +156,9 @@ impl IoVecBuffer {
             }
 
             let bytes_read = loop {
-                match dst.write_volatile(&slice) {
+                let mut bounce = vec![0u8; slice.len()];
+                slice.copy_to(bounce.as_mut_slice());
+                match dst.write_volatile(&VolatileSlice::from(bounce.as_mut_slice())) {
                     Err(VolatileMemoryError::IOError(err))
                         if err.kind() == ErrorKind::Interrupted =>
                     {
@@ -294,13 +296,17 @@ impl IoVecBufferMut {
             }
 
             let bytes_read = loop {
-                match src.read_volatile(&mut slice) {
+                let mut bounce = vec![0u8; slice.len()];
+                match src.read_volatile(&mut VolatileSlice::from(bounce.as_mut_slice())) {
                     Err(VolatileMemoryError::IOError(err))
                         if err.kind() == ErrorKind::Interrupted =>
                     {
                         continue
                     }
-                    Ok(bytes_read) => break bytes_read,
+                    Ok(bytes_read) => {
+                        slice.copy_from(bounce.as_ref());
+                        break bytes_read;
+                    }
                     Err(volatile_memory_error) => return Err(volatile_memory_error),
                 }
             };
