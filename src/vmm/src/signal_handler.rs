@@ -162,7 +162,7 @@ pub fn register_signal_handlers() -> utils::errno::Result<()> {
     // signal handler must only do async-signal-safe operations.
     register_signal_handler(SIGSYS, sigsys_handler)?;
     register_signal_handler(SIGBUS, sigbus_handler)?;
-    register_signal_handler(SIGSEGV, sigsegv_handler)?;
+    //register_signal_handler(SIGSEGV, sigsegv_handler)?;
     register_signal_handler(SIGXFSZ, sigxfsz_handler)?;
     register_signal_handler(SIGXCPU, sigxcpu_handler)?;
     register_signal_handler(SIGPIPE, sigpipe_handler)?;

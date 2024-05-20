@@ -187,16 +187,11 @@ impl Tap {
 
     /// Write an `IoVecBuffer` to tap
     pub(crate) fn write_iovec(&mut self, buffer: &IoVecBuffer) -> Result<usize, IoError> {
-        let iovcnt = i32::try_from(buffer.iovec_count()).unwrap();
-        let iov = buffer.as_iovec_ptr();
-
-        // SAFETY: `writev` is safe. Called with a valid tap fd, the iovec pointer and length
-        // is provide by the `IoVecBuffer` implementation and we check the return value.
-        let ret = unsafe { libc::writev(self.tap_file.as_raw_fd(), iov, iovcnt) };
-        if ret == -1 {
-            return Err(IoError::last_os_error());
-        }
-        Ok(usize::try_from(ret).unwrap())
+        let mut buf = vec![0u8; buffer.len() as usize];
+        log::error!("My buffer is {:?}", buffer);
+        buffer.read_exact_volatile_at(buf.as_mut_slice(), 0).unwrap();
+        log::error!("We copied the data to firecracker userspace: {:?}", buf);
+        self.write(buf.as_ref())
     }
 }
 
