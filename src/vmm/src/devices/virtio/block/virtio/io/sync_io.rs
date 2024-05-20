@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 
-use vm_memory::{GuestMemoryError, ReadVolatile, WriteVolatile};
+use vm_memory::{GuestMemoryError, VolatileMemoryError};
 
 use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
 
@@ -54,7 +54,14 @@ impl SyncFileEngine {
             .seek(SeekFrom::Start(offset))
             .map_err(SyncIoError::Seek)?;
         mem.get_slice(addr, count as usize)
-            .and_then(|mut slice| Ok(self.file.read_exact_volatile(&mut slice)?))
+            .and_then(|vs| {
+                let mut vec = vec![0u8; vs.len()];
+                self.file
+                    .read_exact(vec.as_mut_slice())
+                    .map_err(VolatileMemoryError::IOError)?;
+                vs.copy_from(vec.as_ref());
+                Ok(())
+            })
             .map_err(SyncIoError::Transfer)?;
         Ok(count)
     }
@@ -70,7 +77,14 @@ impl SyncFileEngine {
             .seek(SeekFrom::Start(offset))
             .map_err(SyncIoError::Seek)?;
         mem.get_slice(addr, count as usize)
-            .and_then(|slice| Ok(self.file.write_all_volatile(&slice)?))
+            .and_then(|slice| {
+                let mut vec = vec![0u8; slice.len()];
+                slice.copy_to(vec.as_mut_slice());
+                Ok(self
+                    .file
+                    .write_all(vec.as_ref())
+                    .map_err(VolatileMemoryError::IOError)?)
+            })
             .map_err(SyncIoError::Transfer)?;
         Ok(count)
     }
