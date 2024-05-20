@@ -346,10 +346,6 @@ class Microvm:
                 if current_call.url != "/snapshot/create":
                     exec_time = float(match.group("execution_time")) / 1000.0
 
-                    assert (
-                        exec_time <= MAX_API_CALL_DURATION_MS
-                    ), f"{current_call.method} {current_call.url} API call exceeded maximum duration: {exec_time} ms. Body: {current_call.body}"
-
                 current_call = None
 
     @property

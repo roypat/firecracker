@@ -35,12 +35,14 @@ def test_api_happy_start(uvm_plain):
     """
     test_microvm = uvm_plain
     test_microvm.spawn()
+    test_microvm.add_net_iface()
 
     # Set up the microVM with 2 vCPUs, 256 MiB of RAM and
     # a root file system with the rw permission.
     test_microvm.basic_config()
 
     test_microvm.start()
+    test_microvm.ssh.run("true")
 
 
 def test_drive_io_engine(uvm_plain):
