@@ -25,6 +25,8 @@ use crate::vstate::vm::VmError;
 /// VM type that supports guest private memory
 pub const KVM_X86_SW_PROTECTED_VM: u64 = 1;
 
+pub const KVM_GMEM_NO_DIRECT_MAP: u64 = 1;
+
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
@@ -95,7 +97,7 @@ pub fn create_guest_memfd(vm: &VmFd, size: u64) -> Result<File, MemoryError> {
             KVM_CREATE_GUEST_MEMFD(),
             &kvm_create_guest_memfd {
                 size,
-                flags: 0,
+                flags: KVM_GMEM_NO_DIRECT_MAP,
                 ..Default::default()
             },
         )
@@ -117,7 +119,7 @@ impl Vm {
             slot,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len(),
-            userspace_addr: region.as_ptr() as u64,
+            userspace_addr: unsafe { libc::mmap(std::ptr::null_mut(), region.len() as _, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_NORESERVE | libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0)as _},
             guest_memfd_offset: region.start_addr().raw_value(),
             guest_memfd: guest_memfd.as_raw_fd() as u32,
             flags: KVM_MEM_PRIVATE,
