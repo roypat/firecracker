@@ -161,7 +161,15 @@ def collect_data(binary_dir: Path, tests: list[str]):
 
     print(f"Collecting samples with {binary_dir}")
     subprocess.run(
-        ["./tools/test.sh", f"--binary-dir={binary_dir}", *tests, "-m", "", "-k", "1vcpu and 4.14 and not Async"],
+        [
+            "./tools/test.sh",
+            f"--binary-dir={binary_dir}",
+            *tests,
+            "-m",
+            "",
+            "-k",
+            "1vcpu and 4.14 and not Async",
+        ],
         env=os.environ
         | {
             "AWS_EMF_ENVIRONMENT": "local",
