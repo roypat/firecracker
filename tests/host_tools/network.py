@@ -38,8 +38,7 @@ class SSHConnection:
         self.user = user
 
         self.options = [
-            "-o",
-            "LogLevel=ERROR",
+            "-vvv",
             "-o",
             "ConnectTimeout=1",
             "-o",
@@ -99,6 +98,7 @@ class SSHConnection:
         """Execute the command passed as a string in the ssh context."""
         return self._exec(
             [
+                "/firecracker/tests/my_test_script.sh",
                 "ssh",
                 *self.options,
                 f"{self.user}@{self.host}",

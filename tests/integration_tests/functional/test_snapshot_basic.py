@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -547,10 +548,34 @@ def test_vmgenid(guest_kernel_linux_6_1, rootfs, microvm_factory, snapshot_type)
 
     base_vm = microvm_factory.build(guest_kernel_linux_6_1, rootfs)
     base_vm.spawn()
-    base_vm.basic_config(track_dirty_pages=True)
+    base_vm.basic_config(track_dirty_pages=True, mem_size_mib=1024)
     base_vm.add_net_iface()
+
+    # Add a scratch block device to store strace on.
+    fs = drive_tools.FilesystemFile(
+        os.path.join(base_vm.fsfiles, "scratch"), size=1024 * 10
+    )
+    base_vm.add_drive("scratch", fs.path, io_engine="Sync")
     base_vm.start()
     base_vm.wait_for_up()
+
+    base_vm.ssh.check_output("mkdir /tmp/scratch")
+    base_vm.ssh.check_output("mount /dev/vdb /tmp/scratch")
+
+    base_vm.ssh.scp_put("/firecracker/strace", "/tmp/strace")
+
+    for lib in [
+        "libdw.so.1",
+        "libunwind-ptrace.so.0",
+        "libunwind-x86_64.so.8",
+        "libunwind.so.8",
+    ]:
+        base_vm.ssh.scp_put(f"/firecracker/{lib}", f"/tmp/{lib}")
+
+    base_vm.ssh.check_output(
+        "tmux new -d -s strace 'LD_LIBRARY_PATH=/tmp /tmp/strace -r -T -f -p $(cat /run/sshd.pid) >/tmp/scratch/sshd.trace 2>&1'"
+    )
+    base_vm.ssh.check_output("tmux list-sessions")
 
     snapshot = base_vm.make_snapshot(snapshot_type)
     base_snapshot = snapshot
@@ -560,7 +585,17 @@ def test_vmgenid(guest_kernel_linux_6_1, rootfs, microvm_factory, snapshot_type)
         vm = microvm_factory.build()
         vm.spawn()
         vm.restore_from_snapshot(snapshot, resume=True)
-        vm.wait_for_up()
+        try:
+            vm.wait_for_up()
+        except subprocess.TimeoutExpired:
+            vm.make_snapshot(
+                SnapshotType.FULL,
+                vmstate_path="timeout.vmstate",
+                mem_path="timeout.mem",
+            )
+            vm.kill()
+
+            raise
 
         # We should have as DMESG_VMGENID_RESUME messages as
         # snapshots we have resumed

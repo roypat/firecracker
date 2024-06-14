@@ -37,6 +37,16 @@ cp -ruvf build/img /srv
 cd tests
 export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:-} --pdbcls=IPython.terminal.debugger:TerminalPdb"
 
+apt-get update
+apt-get -y install moreutils
+
+cp $(which strace) ..
+# different locations on AL and Ubuntu
+
+for lib in libdw.so.1 libunwind-ptrace.so.0 libunwind-x86_64.so.8 libunwind.so.8; do
+  cp $(find / -name $lib 2>/dev/null |head -n1) ..
+done
+
 {
     # disable errexit momentarily so we can capture the exit status
     set +e
