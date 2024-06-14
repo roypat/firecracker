@@ -95,7 +95,7 @@ class SSHConnection:
         if ecode != 0:
             raise ConnectionError
 
-    def run(self, cmd_string, timeout=None):
+    def run(self, cmd_string, timeout=None, *, check_output=False):
         """Execute the command passed as a string in the ssh context."""
         return self._exec(
             [
@@ -105,13 +105,20 @@ class SSHConnection:
                 cmd_string,
             ],
             timeout,
+            ignore_return_code=not check_output,
         )
 
-    def _exec(self, cmd, timeout=None):
+    def check_output(self, cmd_string, timeout=None):
+        """Same as `run`, but raises an exception on non-zero return code of remote command"""
+        return self.run(cmd_string, timeout, check_output=True)
+
+    def _exec(self, cmd, timeout=None, ignore_return_code=True):
         """Private function that handles the ssh client invocation."""
         if self.netns is not None:
             cmd = ["ip", "netns", "exec", self.netns] + cmd
-        return utils.run_cmd(cmd, ignore_return_code=True, timeout=timeout)
+        return utils.run_cmd(
+            cmd, ignore_return_code=ignore_return_code, timeout=timeout
+        )
 
 
 def mac_from_ip(ip_address):
