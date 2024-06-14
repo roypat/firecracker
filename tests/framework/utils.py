@@ -383,8 +383,16 @@ def run_cmd_sync(cmd, ignore_return_code=False, no_shell=False, cwd=None, timeou
             cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd
         )
 
-    # Capture stdout/stderr
-    stdout, stderr = proc.communicate(timeout=timeout)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+
+        CMDLOG.error(stdout.decode("UTF-8"))
+        CMDLOG.error(stderr.decode("UTF-8"))
+
+        raise
 
     output_message = f"\n[{proc.pid}] Command:\n{cmd}"
     # Append stdout/stderr to the output message
