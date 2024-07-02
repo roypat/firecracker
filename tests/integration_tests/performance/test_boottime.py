@@ -201,6 +201,7 @@ def test_boottime(
         vm.start()
         vm.pin_threads(0)
         boottime_us = _get_microvm_boottime(vm)
+        print(vm.ssh.check_output("dmesg").stdout)
         metrics.put_metric("boot_time", boottime_us, unit="Microseconds")
         timestamps = find_events(vm.log_data)
         build_time = timestamps["build microvm for boot"]["duration"]
