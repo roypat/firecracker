@@ -562,9 +562,28 @@ impl KvmVcpu {
         self.fd
             .set_lapic(&state.lapic)
             .map_err(KvmVcpuError::VcpuSetLapic)?;
+        let mut msr_ia32_tsc_deadline = None;
         for msrs in &state.saved_msrs {
-            let nmsrs = self.fd.set_msrs(msrs).map_err(KvmVcpuError::VcpuSetMsrs)?;
-            if nmsrs < msrs.as_fam_struct_ref().nmsrs as usize {
+            let tsc_deadline = msrs.as_slice().iter().find(|entry| entry.index == 0x6e0);
+            if let Some(tsc_deadline) = tsc_deadline {
+                assert!(!msr_ia32_tsc_deadline.is_some(), "wtf?");
+
+                msr_ia32_tsc_deadline = Some(tsc_deadline.clone());
+
+                let msrs = Msrs::from_entries(msrs.as_slice().into_iter().cloned().filter(|entry| entry.index != 0x6e0).collect::<Vec<_>>().as_ref())?;
+                let nmsrs = self.fd.set_msrs(&msrs).map_err(KvmVcpuError::VcpuSetMsrs)?;
+                if nmsrs < msrs.as_fam_struct_ref().nmsrs as usize {
+                    return Err(KvmVcpuError::VcpuSetMsrsIncomplete);
+                }
+            } else {
+                let nmsrs = self.fd.set_msrs(msrs).map_err(KvmVcpuError::VcpuSetMsrs)?;
+                if nmsrs < msrs.as_fam_struct_ref().nmsrs as usize {
+                    return Err(KvmVcpuError::VcpuSetMsrsIncomplete);
+                }
+            }
+        }
+        if let Some(tsc_deadline) = msr_ia32_tsc_deadline {
+            if self.fd.set_msrs(&Msrs::from_entries(&[tsc_deadline])?).map_err(KvmVcpuError::VcpuSetMsrs)? != 1 {
                 return Err(KvmVcpuError::VcpuSetMsrsIncomplete);
             }
         }

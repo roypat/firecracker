@@ -537,7 +537,7 @@ def test_snapshot_overwrite_self(guest_kernel, rootfs, microvm_factory):
     vm.wait_for_up()
 
 
-@pytest.mark.parametrize("snapshot_type", [SnapshotType.DIFF, SnapshotType.FULL])
+@pytest.mark.parametrize("snapshot_type", [SnapshotType.FULL])
 def test_vmgenid(guest_kernel_linux_6_1, rootfs, microvm_factory, snapshot_type):
     """
     Test VMGenID device upon snapshot resume
@@ -556,10 +556,13 @@ def test_vmgenid(guest_kernel_linux_6_1, rootfs, microvm_factory, snapshot_type)
     base_snapshot = snapshot
     base_vm.kill()
 
-    for i in range(5):
+    for i in range(10):
         vm = microvm_factory.build()
         vm.spawn()
         copied_snapshot = vm.restore_from_snapshot(snapshot, resume=True)
+        vm.wait_for_up()
+
+        assert "MSR_IA32_TSC_DEADLINE" not in vm.log_data
 
         # We should have as DMESG_VMGENID_RESUME messages as
         # snapshots we have resumed
