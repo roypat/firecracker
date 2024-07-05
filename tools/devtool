@@ -895,7 +895,7 @@ cmd_mkdocs() {
 }
 
 cmd_checkstyle() {
-    cmd_test --no-build -- integration_tests/style -n 4 --dist worksteal
+    cmd_test --no-build -- integration_tests/style
 }
 
 # Check if able to run firecracker.
