@@ -151,7 +151,8 @@ function get_tag {
 
     # list all tags from newest to oldest
     (git --no-pager tag -l --sort=-creatordate | grep "microvm-kernel-$1\..*\.amzn2" \
-        || git --no-pager tag -l --sort=-creatordate | grep "kernel-$1\..*\.amzn2") | head -n1
+        || git --no-pager tag -l --sort=-creatordate | grep "kernel-$1\..*\.amzn2" \
+        || git --no-pager tag -l --sort=-creatordate | grep "v$1\.") | head -n1
 }
 
 function build_al_kernel {
@@ -161,6 +162,7 @@ function build_al_kernel {
 
     pushd linux
     make distclean
+    git reset --hard
 
     git checkout $(get_tag $KERNEL_VERSION)
 
@@ -225,6 +227,7 @@ build_al_kernel $PWD/guest_configs/microvm-kernel-ci-$ARCH-4.14.config
 build_al_kernel $PWD/guest_configs/microvm-kernel-ci-$ARCH-5.10.config
 if [ $ARCH == "x86_64" ]; then
     build_al_kernel $PWD/guest_configs/microvm-kernel-ci-$ARCH-5.10-no-acpi.config
+    build_al_kernel $PWD/guest_configs/microvm-kernel-ci-$ARCH-6.5.config
 fi
 build_al_kernel $PWD/guest_configs/microvm-kernel-ci-$ARCH-6.1.config
 
