@@ -186,11 +186,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
                 let index = std::hint::black_box(i);
                 let len = std::hint::black_box(i + 1);
                 // SAFETY: will never panic.
-                unsafe {
-                    queue
-                        .add_used(&mem, index as u16, len as u32)
-                        .unwrap_unchecked()
-                };
+                unsafe { queue.add_used(index as u16, len as u32).unwrap_unchecked() };
             }
         })
     });
@@ -203,11 +199,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
                 let index = std::hint::black_box(i);
                 let len = std::hint::black_box(i + 1);
                 // SAFETY: will never panic.
-                unsafe {
-                    queue
-                        .add_used(&mem, index as u16, len as u32)
-                        .unwrap_unchecked()
-                };
+                unsafe { queue.add_used(index as u16, len as u32).unwrap_unchecked() };
             }
         })
     });
@@ -220,11 +212,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
                 let index = std::hint::black_box(i);
                 let len = std::hint::black_box(i + 1);
                 // SAFETY: will never panic.
-                unsafe {
-                    queue
-                        .add_used(&mem, index as u16, len as u32)
-                        .unwrap_unchecked()
-                };
+                unsafe { queue.add_used(index as u16, len as u32).unwrap_unchecked() };
             }
         })
     });
