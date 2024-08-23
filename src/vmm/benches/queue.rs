@@ -26,7 +26,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
             // SAFETY: queue has 1 desc chanin
-            let desc = unsafe { queue.pop(&mem).unwrap_unchecked() };
+            let desc = unsafe { queue.pop().unwrap_unchecked() };
             let mut head = Some(desc);
             while let Some(d) = head {
                 head = d.next_descriptor();
@@ -43,7 +43,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
             // SAFETY: queue has 1 desc chanin
-            let desc = unsafe { queue.pop(&mem).unwrap_unchecked() };
+            let desc = unsafe { queue.pop().unwrap_unchecked() };
             let mut head = Some(desc);
             while let Some(d) = head {
                 head = d.next_descriptor();
@@ -62,7 +62,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
             // SAFETY: queue has 1 desc chanin
-            let desc = unsafe { queue.pop(&mem).unwrap_unchecked() };
+            let desc = unsafe { queue.pop().unwrap_unchecked() };
             let mut head = Some(desc);
             while let Some(d) = head {
                 head = d.next_descriptor();
@@ -93,7 +93,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
             // SAFETY: queue has 1 desc chanin
-            let desc = unsafe { queue.pop(&mem).unwrap_unchecked() };
+            let desc = unsafe { queue.pop().unwrap_unchecked() };
             let mut head = Some(desc);
             while let Some(d) = head {
                 head = d.next_descriptor();
@@ -110,7 +110,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
     c.bench_function("queue_pop_1", |b| {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
-            while let Some(desc) = queue.pop(&mem) {
+            while let Some(desc) = queue.pop() {
                 std::hint::black_box(desc);
             }
         })
@@ -129,7 +129,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
     c.bench_function("queue_pop_4", |b| {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
-            while let Some(desc) = queue.pop(&mem) {
+            while let Some(desc) = queue.pop() {
                 std::hint::black_box(desc);
             }
         })
@@ -172,7 +172,7 @@ pub fn queue_benchmark(c: &mut Criterion) {
     c.bench_function("queue_pop_16", |b| {
         b.iter(|| {
             queue.next_avail = Wrapping(0);
-            while let Some(desc) = queue.pop(&mem) {
+            while let Some(desc) = queue.pop() {
                 std::hint::black_box(desc);
             }
         })

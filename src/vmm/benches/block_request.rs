@@ -24,7 +24,7 @@ pub fn block_request_benchmark(c: &mut Criterion) {
     let mut queue = virt_queue.create_queue();
 
     // SAFETY: queue has 1 desc chanin
-    let desc = unsafe { queue.pop(&mem).unwrap_unchecked() };
+    let desc = unsafe { queue.pop().unwrap_unchecked() };
 
     c.bench_function("request_parse", |b| {
         b.iter(|| {
