@@ -323,6 +323,13 @@ impl Queue {
     /// Set up pointers to the queue objects in the guest memory
     /// and mark memory dirty for those objects
     pub fn initialize<M: GuestMemory>(&mut self, mem: &M) -> Result<(), QueueError> {
+        assert!(
+            self.actual_size() < self.len(mem),
+            "virtio queue number of available descriptors {} is greater than queue size {}",
+            self.len(mem),
+            self.actual_size()
+        );
+
         let size = self.desc_table_size();
         let slice = mem
             .get_slice(self.desc_table_address, size)
@@ -466,7 +473,7 @@ impl Queue {
     }
 
     /// Validates the queue's in-memory layout is correct.
-    pub fn is_layout_valid<M: GuestMemory>(&self, mem: &M) -> bool {
+    pub fn is_valid<M: GuestMemory>(&self, mem: &M) -> bool {
         let queue_size = usize::from(self.actual_size());
         let desc_table = self.desc_table_address;
         let desc_table_size = 16 * queue_size;
@@ -518,25 +525,9 @@ impl Queue {
         }
     }
 
-    /// Validates that the queue's representation is correct.
-    pub fn is_valid<M: GuestMemory>(&self, mem: &M) -> bool {
-        if !self.is_layout_valid(mem) {
-            false
-        } else if self.len(mem) > self.max_size {
-            error!(
-                "virtio queue number of available descriptors {} is greater than queue max size {}",
-                self.len(mem),
-                self.max_size
-            );
-            false
-        } else {
-            true
-        }
-    }
-
     /// Returns the number of yet-to-be-popped descriptor chains in the avail ring.
     pub fn len<M: GuestMemory>(&self, mem: &M) -> u16 {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         (self.avail_idx(mem) - self.next_avail).0
     }
@@ -548,7 +539,7 @@ impl Queue {
 
     /// Pop the first available descriptor chain from the avail ring.
     pub fn pop<'b, M: GuestMemory>(&mut self, mem: &'b M) -> Option<DescriptorChain<'b, M>> {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         let len = self.len(mem);
         // The number of descriptor chain heads to process should always
@@ -650,7 +641,7 @@ impl Queue {
         desc_index: u16,
         len: u32,
     ) -> Result<(), QueueError> {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         let next_used = self.next_used.0 % self.actual_size();
         let used_element = UsedElement {
@@ -718,7 +709,7 @@ impl Queue {
     /// Get the value of the used event field of the avail ring.
     #[inline(always)]
     pub fn used_event<M: GuestMemory>(&self, mem: &M) -> Wrapping<u16> {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         // We need to find the `used_event` field from the avail ring.
         let used_event_addr = self
@@ -731,7 +722,7 @@ impl Queue {
     /// Helper method that writes to the `avail_event` field of the used ring.
     #[inline(always)]
     fn set_used_ring_avail_event<M: GuestMemory>(&mut self, avail_event: u16, mem: &M) {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         // Used ring has layout:
         // struct UsedRing {
@@ -754,7 +745,7 @@ impl Queue {
     /// Helper method that writes to the `idx` field of the used ring.
     #[inline(always)]
     fn set_used_ring_idx<M: GuestMemory>(&mut self, next_used: u16, mem: &M) {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         // Used ring has layout:
         // struct UsedRing {
@@ -776,7 +767,7 @@ impl Queue {
     /// from the available ring and we can't guarantee that there will be a notification. In this
     /// case the caller might want to consume the mentioned descriptors and call this method again.
     pub fn try_enable_notification<M: GuestMemory>(&mut self, mem: &M) -> bool {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         // If the device doesn't use notification suppression, we'll continue to get notifications
         // no matter what.
@@ -826,7 +817,7 @@ impl Queue {
     ///
     /// This is similar to the `vring_need_event()` method implemented by the Linux kernel.
     pub fn prepare_kick<M: GuestMemory>(&mut self, mem: &M) -> bool {
-        debug_assert!(self.is_layout_valid(mem));
+        debug_assert!(self.is_valid(mem));
 
         // If the device doesn't use notification suppression, always return true
         if !self.uses_notif_suppression {
@@ -1050,7 +1041,7 @@ mod verification {
             let mut queue = less_arbitrary_queue();
             queue.initialize(&mem).unwrap();
 
-            assert!(queue.is_layout_valid(&mem));
+            assert!(queue.is_valid(&mem));
 
             ProofContext(queue, mem)
         }
@@ -1062,7 +1053,7 @@ mod verification {
             let mut queue = less_arbitrary_queue();
             queue.initialize(&mem).unwrap();
 
-            assert!(queue.is_layout_valid(&mem));
+            assert!(queue.is_valid(&mem));
 
             ProofContext(queue, mem)
         }
@@ -1074,7 +1065,7 @@ mod verification {
             let mut queue: Queue = kani::any();
             queue.initialize(&mem).unwrap();
 
-            kani::assume(queue.is_layout_valid(&mem));
+            kani::assume(queue.is_valid(&mem));
 
             ProofContext(queue, mem)
         }
@@ -1451,18 +1442,6 @@ mod tests {
         q.size = 11;
         assert!(!q.is_valid(m));
         q.size = q.max_size;
-
-        // or when avail_idx - next_avail > max_size
-        q.next_avail = Wrapping(5);
-        assert!(!q.is_valid(m));
-        // avail_ring + 2 is the address of avail_idx in guest mem
-        m.write_obj::<u16>(64_u16, q.avail_ring_address.unchecked_add(2))
-            .unwrap();
-        assert!(!q.is_valid(m));
-        m.write_obj::<u16>(5_u16, q.avail_ring_address.unchecked_add(2))
-            .unwrap();
-        q.max_size = 2;
-        assert!(!q.is_valid(m));
 
         // reset dirtied values
         q.max_size = 16;
