@@ -33,7 +33,7 @@ def test_kani(results_dir):
     # --output-format terse is required by -j
     # --enable-unstable is needed to enable `-Z` flags
     _, stdout, _ = utils.check_output(
-        "cargo kani --enable-unstable -Z stubbing -Z function-contracts --restrict-vtable -j --output-format terse",
+        "cargo kani --enable-unstable -Z stubbing -Z function-contracts --restrict-vtable --output-format terse",
         timeout=2400,
     )
 
