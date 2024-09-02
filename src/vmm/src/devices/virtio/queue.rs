@@ -205,7 +205,7 @@ impl<'a> Iterator for DescriptorIterator<'a> {
 /// A virtio queue's parameters.
 pub struct Queue {
     /// The maximal size in elements offered by the device
-    pub(crate) max_size: u16,
+    pub max_size: u16,
 
     /// The queue size in elements the driver selected
     pub size: u16,
@@ -222,13 +222,13 @@ pub struct Queue {
     /// Guest physical address of the used ring
     pub used_ring: GuestAddress,
 
-    pub(crate) next_avail: Wrapping<u16>,
-    pub(crate) next_used: Wrapping<u16>,
+    pub next_avail: Wrapping<u16>,
+    pub next_used: Wrapping<u16>,
 
     /// VIRTIO_F_RING_EVENT_IDX negotiated (notification suppression enabled)
-    pub(crate) uses_notif_suppression: bool,
+    pub uses_notif_suppression: bool,
     /// The number of added used buffers since last guest kick
-    pub(crate) num_added: Wrapping<u16>,
+    pub num_added: Wrapping<u16>,
 }
 
 #[allow(clippy::len_without_is_empty)]
