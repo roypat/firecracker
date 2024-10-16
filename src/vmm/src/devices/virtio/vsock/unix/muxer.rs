@@ -121,6 +121,7 @@ impl VsockChannel for VsockMuxer {
         // the queue might be out-of-sync. If that's the case, we'll attempt to sync it first,
         // and then try to pop something out again.
         if self.rxq.is_empty() && !self.rxq.is_synced() {
+            info!("Rebuilding MuxerRxQ");
             self.rxq = MuxerRxQ::from_conn_map(&self.conn_map);
         }
 
@@ -252,7 +253,7 @@ impl VsockChannel for VsockMuxer {
     /// Check if the muxer has any pending RX data, with which to fill a guest-provided RX
     /// buffer.
     fn has_pending_rx(&self) -> bool {
-        !self.rxq.is_empty() || !self.rxq.is_synced()
+        !self.rxq.is_empty() || !self.rxq.is_synced() || self.conn_map.values().any(|conn| conn.has_pending_rx())
     }
 }
 
@@ -502,7 +503,9 @@ impl VsockMuxer {
                 // We can safely ignore any error in adding a connection RX indication. Worst
                 // case scenario, the RX queue will get desynchronized, but we'll handle that
                 // the next time we need to yield an RX packet.
-                self.rxq.push(MuxerRx::ConnRx(key));
+                if !self.rxq.push(MuxerRx::ConnRx(key)) {
+                    error!("vsock: failed to push connection RX indication to muxerrx")
+                }
             }
             self.conn_map.insert(key, conn);
             METRICS.conns_added.inc();
@@ -612,6 +615,8 @@ impl VsockMuxer {
     fn handle_peer_request_pkt(&mut self, pkt: &VsockPacketTx) {
         let port_path = format!("{}_{}", self.host_sock_path, pkt.hdr.dst_port());
 
+        debug!("The guest is initiating a connection! {:?}", pkt.hdr);
+
         UnixStream::connect(port_path)
             .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
             .map_err(VsockUnixBackendError::UnixConnect)
@@ -631,7 +636,11 @@ impl VsockMuxer {
                     ),
                 )
             })
-            .unwrap_or_else(|_| self.enq_rst(pkt.hdr.dst_port(), pkt.hdr.src_port()));
+            .unwrap_or_else(|err| {
+                error!("Failure to connect to host unix socket: {:?}", err);
+
+                self.enq_rst(pkt.hdr.dst_port(), pkt.hdr.src_port());
+            });
     }
 
     /// Perform an action that might mutate a connection's state.

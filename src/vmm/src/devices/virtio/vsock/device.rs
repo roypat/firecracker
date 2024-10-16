@@ -49,7 +49,7 @@ pub(crate) const VIRTIO_VSOCK_EVENT_TRANSPORT_RESET: u32 = 0;
 /// - VIRTIO_F_IN_ORDER: the device returns used buffers in the same order that the driver makes
 ///   them available.
 pub(crate) const AVAIL_FEATURES: u64 =
-    1 << uapi::VIRTIO_F_VERSION_1 as u64 | 1 << uapi::VIRTIO_F_IN_ORDER as u64;
+    1 << uapi::VIRTIO_F_VERSION_1 as u64;
 
 /// Structure representing the vsock device.
 #[derive(Debug)]
@@ -150,31 +150,35 @@ where
 
         let mut have_used = false;
 
+        log::debug!("process_rx: rxq len {}, rxq avail idx {}, rxq next avail {}", self.queues[RXQ_INDEX].len(), self.queues[RXQ_INDEX].avail_ring_idx_get(), self.queues[RXQ_INDEX].next_avail);
+
         while let Some(head) = self.queues[RXQ_INDEX].pop() {
             let index = head.index;
             let used_len = match self.rx_packet.parse(mem, head) {
                 Ok(()) => {
-                    if self.backend.recv_pkt(&mut self.rx_packet).is_ok() {
-                        match self.rx_packet.commit_hdr() {
-                            // This addition cannot overflow, because packet length
-                            // is previously validated against `MAX_PKT_BUF_SIZE`
-                            // bound as part of `commit_hdr()`.
-                            Ok(()) => VSOCK_PKT_HDR_SIZE + self.rx_packet.hdr.len(),
-                            Err(err) => {
-                                warn!(
-                                    "vsock: Error writing packet header to guest memory: \
-                                     {:?}.Discarding the package.",
-                                    err
-                                );
-                                0
-                            }
-                        }
-                    } else {
+                    if let Err(err) = self.backend.recv_pkt(&mut self.rx_packet) {
                         // We are using a consuming iterator over the virtio buffers, so, if we
                         // can't fill in this buffer, we'll need to undo the
                         // last iterator step.
+                        warn!("Something went wrong in self.backend.recv_pkt: {:?}", err);
+
                         self.queues[RXQ_INDEX].undo_pop();
                         break;
+                    }
+
+                    match self.rx_packet.commit_hdr() {
+                        // This addition cannot overflow, because packet length
+                        // is previously validated against `MAX_PKT_BUF_SIZE`
+                        // bound as part of `commit_hdr()`.
+                        Ok(()) => VSOCK_PKT_HDR_SIZE + self.rx_packet.hdr.len(),
+                        Err(err) => {
+                            warn!(
+                                "vsock: Error writing packet header to guest memory: \
+                                 {:?}.Discarding the package.",
+                                err
+                            );
+                            0
+                        }
                     }
                 }
                 Err(err) => {
@@ -202,6 +206,7 @@ where
         let mem = self.device_state.mem().unwrap();
 
         let mut have_used = false;
+        log::debug!("process_tx: txq len {}, txq avail idx {}, txq next avail {}", self.queues[TXQ_INDEX].len(), self.queues[TXQ_INDEX].avail_ring_idx_get(), self.queues[TXQ_INDEX].next_avail);
 
         while let Some(head) = self.queues[TXQ_INDEX].pop() {
             let index = head.index;

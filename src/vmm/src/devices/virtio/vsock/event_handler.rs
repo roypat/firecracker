@@ -192,7 +192,7 @@ where
                 _ => warn!("Unexpected vsock event received: {:?}", source),
             }
             if raise_irq {
-                self.signal_used_queue().unwrap_or_default();
+                let _ = self.signal_used_queue().inspect_err(|err| error!("vsock: failed to notify device {:?}", err));
             }
         } else {
             warn!(

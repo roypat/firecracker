@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import shutil
-import time
 from pathlib import Path
 
 import pytest
@@ -157,7 +156,6 @@ def test_5_snapshots(
     # Create a snapshot from a microvm.
     start_guest_echo_server(vm)
     snapshot = vm.make_snapshot(snapshot_type)
-    base_snapshot = snapshot
     vm.kill()
 
     for i in range(seq_len):
@@ -166,9 +164,6 @@ def test_5_snapshots(
         microvm.spawn()
         copied_snapshot = microvm.restore_from_snapshot(snapshot, resume=True)
 
-        # FIXME: This and the sleep below reduce the rate of vsock/ssh connection
-        # related spurious test failures, although we do not know why this is the case.
-        time.sleep(2)
         # Test vsock guest-initiated connections.
         path = os.path.join(
             microvm.path, make_host_port_path(VSOCK_UDS_PATH, ECHO_SERVER_PORT)
@@ -181,22 +176,20 @@ def test_5_snapshots(
         # Check that the root device is not corrupted.
         check_filesystem(microvm.ssh, "squashfs", "/dev/vda")
 
-        time.sleep(2)
         logger.info("Create snapshot %s #%d.", snapshot_type, i + 1)
-        snapshot = microvm.make_snapshot(snapshot_type)
+        new_snapshot = microvm.make_snapshot(snapshot_type)
 
         # If we are testing incremental snapshots we must merge the base with
         # current layer.
         if snapshot.is_diff:
-            logger.info("Base: %s, Layer: %s", base_snapshot.mem, snapshot.mem)
-            snapshot = snapshot.rebase_snapshot(
-                base_snapshot, use_snapshot_editor=use_snapshot_editor
+            logger.info("Base: %s, Layer: %s", snapshot.mem, new_snapshot.mem)
+            new_snapshot = snapshot.rebase_snapshot(
+                snapshot, use_snapshot_editor=use_snapshot_editor
             )
 
         microvm.kill()
+        snapshot = new_snapshot
         copied_snapshot.delete()
-        # Update the base for next iteration.
-        base_snapshot = snapshot
 
 
 def test_patch_drive_snapshot(uvm_nano, microvm_factory):

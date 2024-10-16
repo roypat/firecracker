@@ -7,6 +7,7 @@ import random
 import string
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import TimeoutExpired
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
@@ -43,13 +44,13 @@ class SSHConnection:
             "-o",
             "LogLevel=ERROR",
             "-o",
-            "ConnectTimeout=1",
-            "-o",
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
             "-o",
             "PreferredAuthentications=publickey",
+            "-o",
+            "IPQoS=none",
             "-i",
             str(self.ssh_key),
         ]
@@ -94,6 +95,11 @@ class SSHConnection:
         stop=stop_after_attempt(20),
         reraise=True,
     )
+    @retry(
+        retry=retry_if_exception_type(TimeoutExpired),
+        stop=stop_after_attempt(2),
+        reraise=True,
+    )
     def _init_connection(self):
         """Create an initial SSH client connection (retry until it works).
 
@@ -102,7 +108,7 @@ class SSHConnection:
         We'll keep trying to execute a remote command that can't fail
         (`/bin/true`), until we get a successful (0) exit code.
         """
-        self.check_output("true", timeout=10, debug=True)
+        self.check_output("true", timeout=100, debug=True)
 
     def run(self, cmd_string, timeout=None, *, check=False, debug=False):
         """

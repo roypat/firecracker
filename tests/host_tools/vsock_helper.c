@@ -29,23 +29,29 @@ int print_usage() {
     fprintf(stderr, "\n");
     fprintf(stderr, "  echo          connect to an echo server, listening on CID:port.\n");
     fprintf(stderr, "                STDIN will be piped through to the echo server, and\n");
-    fprintf(stderr, "                data coming from the server will pe sent to STDOUT.\n");
+    fprintf(stderr, "                data coming from the server will be sent to STDOUT.\n");
     fprintf(stderr, "\n");
     return -1;
 }
 
 int xfer(int src_fd, int dst_fd) {
     char buf[BUF_SIZE];
-    int count =  read(src_fd, buf, sizeof(buf));
+    int count = read(src_fd, buf, sizeof(buf));
 
     if (!count) return 0;
-    if (count < 0) return -1;
+    if (count < 0) {
+        perror("read()");
+        return -1;
+    }
 
     int offset = 0;
     do {
         int written;
         written = write(dst_fd, &buf[offset], count - offset);
-        if (written <= 0) return -1;
+        if (written <= 0) {
+            perror("write()");
+            return -1;
+        }
         offset += written;
     } while (offset < count);
 
@@ -54,7 +60,8 @@ int xfer(int src_fd, int dst_fd) {
 
 
 int run_echo(uint32_t cid, uint32_t port) {
-
+    int r = 0;
+    int total = 0;
     int sock = socket(AF_VSOCK, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket()");
@@ -73,15 +80,32 @@ int run_echo(uint32_t cid, uint32_t port) {
 
     for (;;) {
         int ping_cnt = xfer(STDIN_FILENO, sock);
-        if (!ping_cnt) break;
-        if (ping_cnt < 0) return -1;
+        if (!ping_cnt) {
+            fprintf(stderr, "stopping transfer loop after %d bytes\n", total);
+            break;
+        }
+        if (ping_cnt < 0) {
+            r = -1;
+            goto out_close;
+        }
+
+        total += ping_cnt;
 
         int pong_cnt = 0;
         while (pong_cnt < ping_cnt) {
             int res = xfer(sock, STDOUT_FILENO);
-            if (res <= 0) return -1;
+            if (res <= 0) {
+                r = -1;
+                goto out_close;
+            }
             pong_cnt += res;
         }
+    }
+
+out_close:
+    if (close(sock) < 0) {
+        perror("close()");
+        return -1;
     }
 
     return 0;

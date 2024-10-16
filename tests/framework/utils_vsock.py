@@ -139,17 +139,25 @@ def check_guest_connections(vm, server_port_path, blob_path, blob_hash):
     """
 
     echo_server = Popen(
-        ["socat", f"UNIX-LISTEN:{server_port_path},fork,backlog=5", "exec:'/bin/cat'"]
+        [
+            "socat",
+            "-d",
+            "-d",
+            "-d",
+            f"UNIX-LISTEN:{server_port_path},fork,backlog=128",
+            "exec:'/bin/cat'",
+        ]
     )
+
+    # Give socat a bit of time to create the socket
+    while not Path(server_port_path).exists():
+        time.sleep(0.2)
 
     # Link the listening Unix socket into the VM's jail, so that
     # Firecracker can connect to it.
-    attempt = 0
-    # But 1st, give socat a bit of time to create the socket
-    while not Path(server_port_path).exists() and attempt < 3:
-        time.sleep(0.2)
-        attempt += 1
     vm.create_jailed_resource(server_port_path)
+
+    assert Path(server_port_path).exists()
 
     # Increase maximum process count for the ssh service.
     # Avoids: "bash: fork: retry: Resource temporarily unavailable"
@@ -180,15 +188,16 @@ def check_guest_connections(vm, server_port_path, blob_path, blob_hash):
     cmd += "  ({})& ".format(worker_cmd)
     cmd += '  workers="$workers $!";'
     cmd += "done;"
-    cmd += "for w in $workers; do wait $w || exit -1; done"
+    cmd += "for w in $workers; do wait $w || (wait; exit 1); done"
 
-    ecode, _, stderr = vm.ssh.run(cmd)
-    echo_server.terminate()
-    rc = echo_server.wait()
-    # socat exits with 128 + 15 (SIGTERM)
-    assert rc == 143
+    try:
+        _, _, stderr = vm.ssh.check_output(cmd)
 
-    assert ecode == 0, stderr
+        assert len(stderr.splitlines()) == TEST_CONNECTION_COUNT
+    finally:
+        echo_server.terminate()
+        # socat exits with 128 + 15 (SIGTERM)
+        assert echo_server.wait() == 143
 
 
 def make_host_port_path(uds_path, port):
