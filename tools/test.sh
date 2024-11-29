@@ -37,6 +37,8 @@ cp -ruvf build/img /srv
 cd tests
 export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:-} --pdbcls=IPython.terminal.debugger:TerminalPdb"
 
+pip install fabric netns
+
 {
     # disable errexit momentarily so we can capture the exit status
     set +e

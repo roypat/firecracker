@@ -771,7 +771,6 @@ cmd_test() {
         --privileged \
         --security-opt seccomp=unconfined \
         --ulimit core=0 \
-        --ulimit nofile=4096:4096 \
         --ulimit memlock=-1:-1 \
         --workdir "$CTR_FC_ROOT_DIR" \
         --cpuset-cpus="$cpuset_cpus" \
@@ -891,7 +890,7 @@ cmd_sh() {
 cmd_sandbox() {
     cmd_build --release
     ensure_ci_artifacts
-    cmd_sh "tmux new env PYTEST_ADDOPTS=--pdbcls=IPython.terminal.debugger:TerminalPdb PYTHONPATH=tests IPYTHONDIR=\$PWD/.ipython ipython -i ./tools/sandbox.py $@"
+    cmd_sh "pip install fabric && apt-get update && apt-get install -y netcat-openbsd && tmux new env PYTEST_ADDOPTS=--pdbcls=IPython.terminal.debugger:TerminalPdb PYTHONPATH=tests IPYTHONDIR=\$PWD/.ipython ipython -i ./tools/sandbox.py $@"
 }
 
 cmd_sandbox_native() {

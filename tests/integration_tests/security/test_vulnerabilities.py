@@ -400,6 +400,7 @@ def check_vulnerabilities_files_on_guest(microvm):
     # Retrieve a list of vulnerabilities files available inside guests.
     vuln_dir = "/sys/devices/system/cpu/vulnerabilities"
     _, stdout, _ = microvm.ssh.check_output(f"find -D all {vuln_dir} -type f")
+
     vuln_files = stdout.split("\n")
 
     # Fixtures in this file (test_vulnerabilities.py) add this special field.
