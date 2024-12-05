@@ -16,14 +16,15 @@ use std::cmp::min;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt::Debug;
-
-use vm_memory::GuestMemoryError;
+use std::fs::File;
+use std::os::fd::AsRawFd;
+use vm_memory::{GuestMemoryError, ReadVolatile, VolatileSlice};
 
 pub use self::fdt::DeviceInfoForFDT;
 use self::gic::GICDevice;
 use crate::arch::DeviceType;
 use crate::devices::acpi::vmgenid::VmGenId;
-use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemfd, GuestMemory, GuestMemoryMmap};
 
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -60,6 +61,7 @@ pub fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
 /// * `gic_device` - The GIC device.
 /// * `initrd` - Information about an optional initrd.
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
+    guest_memfd: &GuestMemfd,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: CString,
     vcpu_mpidr: Vec<u64>,
@@ -78,8 +80,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
         initrd,
     )?;
     let fdt_address = GuestAddress(get_fdt_addr(guest_mem));
-    guest_mem
-        .write_slice(fdt.as_slice(), fdt_address)
+    guest_memfd.read_volatile_from(fdt_address, &mut fdt.as_slice(), fdt.len())
         .map_err(ConfigurationError::MemoryError)?;
     Ok(())
 }

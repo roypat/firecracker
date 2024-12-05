@@ -7,15 +7,16 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
-
+use std::fs::File;
+use std::os::fd::{AsRawFd, FromRawFd};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, CpuId, MsrList,
     KVM_CLOCK_TSC_STABLE, KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE,
     KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY,
 };
-use kvm_bindings::{kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES};
-use kvm_ioctls::{Kvm, VmFd};
+use kvm_bindings::{kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region2, KVM_API_VERSION, KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES};
+use kvm_ioctls::{Cap, Kvm, VmFd};
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "aarch64")]
@@ -25,7 +26,7 @@ use crate::arch::aarch64::gic::GicState;
 use crate::cpu_config::templates::KvmCapability;
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use crate::vstate::memory::{Address, GuestMemfd, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -148,7 +149,8 @@ impl Vm {
 
         let max_memslots = kvm.get_nr_memslots();
         // Create fd for interacting with kvm-vm specific functions.
-        let vm_fd = kvm.create_vm().map_err(VmError::VmFd)?;
+
+        let vm_fd = kvm.create_vm_with_type(kvm.get_host_ipa_limit() as u64 | 1 << 8).map_err(VmError::VmFd)?;
 
         #[cfg(target_arch = "aarch64")]
         {
@@ -211,43 +213,57 @@ impl Vm {
         &self,
         guest_mem: &GuestMemoryMmap,
         track_dirty_pages: bool,
-    ) -> Result<(), VmError> {
+    ) -> Result<GuestMemfd, VmError> {
         if guest_mem.num_regions() > self.max_memslots {
             return Err(VmError::NotEnoughMemorySlots);
         }
-        self.set_kvm_memory_regions(guest_mem, track_dirty_pages)?;
+
+        let guest_memfd = GuestMemfd::new(&self.fd, guest_mem.last_addr().0 + 1);
+
+        self.set_kvm_memory_regions(&guest_memfd, guest_mem, track_dirty_pages)?;
         #[cfg(target_arch = "x86_64")]
         self.fd
             .set_tss_address(u64_to_usize(crate::arch::x86_64::layout::KVM_TSS_ADDRESS))
             .map_err(VmError::VmSetup)?;
 
-        Ok(())
+        Ok(guest_memfd)
     }
 
     pub(crate) fn set_kvm_memory_regions(
         &self,
+        guest_memfd: &GuestMemfd,
         guest_mem: &GuestMemoryMmap,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
-        let mut flags = 0u32;
-        if track_dirty_pages {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
+        let mut flags = KVM_MEM_GUEST_MEMFD;
+
         guest_mem
             .iter()
             .zip(0u32..)
             .try_for_each(|(region, slot)| {
-                let memory_region = kvm_userspace_memory_region {
+                let memory_region = kvm_userspace_memory_region2 {
                     slot,
                     guest_phys_addr: region.start_addr().raw_value(),
                     memory_size: region.len(),
                     // It's safe to unwrap because the guest address is valid.
                     userspace_addr: guest_mem.get_host_address(region.start_addr()).unwrap() as u64,
+                    guest_memfd_offset: region.start_addr().raw_value(),
+                    guest_memfd: guest_memfd.as_raw_fd() as _,
                     flags,
+                    ..Default::default()
                 };
 
                 // SAFETY: Safe because the fd is a valid KVM file descriptor.
-                unsafe { self.fd.set_user_memory_region(memory_region) }
+                unsafe { self.fd.set_user_memory_region2(memory_region)? }
+
+                let attributes = kvm_memory_attributes {
+                    address: region.start_addr().raw_value(),
+                    size: region.len(),
+                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as _,
+                    ..Default::default()
+                };
+
+                self.fd.set_memory_attributes(attributes)
             })
             .map_err(VmError::SetUserMemoryRegion)?;
         Ok(())

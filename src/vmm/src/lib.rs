@@ -112,6 +112,7 @@ pub mod vmm_config;
 pub mod vstate;
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::sync::mpsc::RecvTimeoutError;
@@ -147,9 +148,7 @@ use crate::rate_limiter::BucketUpdate;
 use crate::snapshot::Persist;
 use crate::utils::u64_to_usize;
 use crate::vmm_config::instance_info::{InstanceInfo, VmState};
-use crate::vstate::memory::{
-    GuestMemory, GuestMemoryExtension, GuestMemoryMmap, GuestMemoryRegion,
-};
+use crate::vstate::memory::{GuestMemfd, GuestMemory, GuestMemoryExtension, GuestMemoryMmap, GuestMemoryRegion};
 use crate::vstate::vcpu::VcpuState;
 pub use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuEvent, VcpuHandle, VcpuResponse};
 pub use crate::vstate::vm::Vm;
@@ -324,6 +323,7 @@ pub struct Vmm {
     #[cfg(target_arch = "x86_64")]
     pio_device_manager: PortIODeviceManager,
     acpi_device_manager: ACPIDeviceManager,
+    guest_memfd: GuestMemfd,
 }
 
 impl Vmm {
@@ -625,18 +625,6 @@ impl Vmm {
             })
             .map_err(VmmError::DirtyBitmap)?;
         Ok(bitmap)
-    }
-
-    /// Enables or disables KVM dirty page tracking.
-    pub fn set_dirty_page_tracking(&mut self, enable: bool) -> Result<(), VmmError> {
-        // This function _always_ results in an ioctl update. The VMM is stateless in the sense
-        // that it's unaware of the current dirty page tracking setting.
-        // The VMM's consumer will need to cache the dirty tracking setting internally. For
-        // example, if this function were to be exposed through the VMM controller, the VMM
-        // resources should cache the flag.
-        self.vm
-            .set_kvm_memory_regions(&self.guest_memory, enable)
-            .map_err(VmmError::Vm)
     }
 
     /// Updates the path of the host file backing the emulated block device with id `drive_id`.

@@ -22,10 +22,8 @@ assertions_on_result_states = "warn"
 error_impl_error = "warn"
 
 [profile.dev]
-panic = "abort"
 
 [profile.release]
-panic = "abort"
 lto = true
 strip = "none"
 

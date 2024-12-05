@@ -7,7 +7,8 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
-
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use kvm_bindings::kvm_create_guest_memfd;
 use serde::{Deserialize, Serialize};
 pub use vm_memory::bitmap::{AtomicBitmap, Bitmap, BitmapSlice, BS};
 pub use vm_memory::mmap::MmapRegionBuilder;
@@ -16,7 +17,7 @@ pub use vm_memory::{
     address, Address, ByteValued, Bytes, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion,
     GuestUsize, MemoryRegionAddress, MmapRegion,
 };
-use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
+use vm_memory::{Error as VmMemoryError, GuestMemoryError, ReadVolatile, VolatileSlice, WriteVolatile};
 use vmm_sys_util::errno;
 
 use crate::utils::{get_page_size, u64_to_usize};
@@ -53,6 +54,69 @@ pub enum MemoryError {
     MemfdSetLen(std::io::Error),
     /// Cannot restore hugetlbfs backed snapshot by mapping the memory file. Please use uffd.
     HugetlbfsSnapshot,
+}
+
+#[derive(Debug)]
+pub struct GuestMemfd {
+    file: File,
+    size: u64,
+}
+
+impl AsRawFd for GuestMemfd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
+
+impl GuestMemfd {
+    pub fn new(vm: &kvm_ioctls::VmFd, size: u64) -> Self {
+        let create_gmem = kvm_create_guest_memfd {
+            // this is very inefficient, because this means we allocate gmem even for "holes". Fix it later.
+            size,
+            flags: 0,
+            ..Default::default()
+        };
+        let guest_memfd = vm.create_guest_memfd(create_gmem).unwrap();
+
+        let guest_memfd = unsafe { File::from_raw_fd(guest_memfd) };
+
+        GuestMemfd {
+            file: guest_memfd,
+            size
+        }
+    }
+}
+
+impl GuestMemory for GuestMemfd {
+    type R = GuestRegionMmap;
+
+    fn num_regions(&self) -> usize {
+        todo!()
+    }
+
+    fn find_region(&self, addr: GuestAddress) -> Option<&Self::R> {
+        todo!()
+    }
+
+    fn iter(&self) -> impl Iterator<Item=&Self::R> {
+        [].iter()
+    }
+
+    fn read_volatile_from<F>(&self, addr: GuestAddress, src: &mut F, count: usize) -> vm_memory::guest_memory::Result<usize>
+    where
+        F: ReadVolatile
+    {
+        let count_rounded_to_page_size = (count + 4095) & !4095;
+        assert_eq!(addr.0 % 4096, 0);
+        assert!(addr.0 <= self.size as u64);
+        assert!(addr.0 + count as u64 <= self.size as u64);
+        let mut data = vec![0u8; count_rounded_to_page_size];
+        src.read_exact_volatile(&mut VolatileSlice::from(&mut data[..count])).unwrap();
+        let r = unsafe { libc::pwrite64(self.file.as_raw_fd(), data.as_ptr() as _, count_rounded_to_page_size, addr.0 as _) };
+        assert!(r >= 0);
+        assert_eq!(r as usize , count_rounded_to_page_size);
+        Ok(count)
+    }
 }
 
 /// Defines the interface for snapshotting memory.

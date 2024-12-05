@@ -68,7 +68,7 @@ use crate::utils::u64_to_usize;
 use crate::vmm_config::boot_source::BootConfig;
 use crate::vmm_config::instance_info::InstanceInfo;
 use crate::vmm_config::machine_config::{VmConfig, VmConfigError};
-use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{GuestAddress, GuestMemfd, GuestMemory, GuestMemoryMmap};
 use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuError};
 use crate::vstate::vm::Vm;
 use crate::{device_manager, EventManager, Vmm, VmmError};
@@ -165,7 +165,7 @@ fn create_vmm_and_vcpus(
     let mut vm = Vm::new(kvm_capabilities)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
-    vm.memory_init(&guest_memory, track_dirty_pages)
+    let guest_memfd = vm.memory_init(&guest_memory, track_dirty_pages)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
@@ -237,6 +237,7 @@ fn create_vmm_and_vcpus(
         #[cfg(target_arch = "x86_64")]
         pio_device_manager,
         acpi_device_manager,
+        guest_memfd,
     };
 
     Ok((vmm, vcpus))
@@ -268,8 +269,6 @@ pub fn build_microvm_for_boot(
         .allocate_guest_memory()
         .map_err(StartMicrovmError::GuestMemory)?;
 
-    let entry_addr = load_kernel(boot_config, &guest_memory)?;
-    let initrd = load_initrd_from_config(boot_config, &guest_memory)?;
     // Clone the command-line so that a failed boot doesn't pollute the original.
     #[allow(unused_mut)]
     let mut boot_cmdline = boot_config.cmdline.clone();
@@ -334,6 +333,9 @@ pub fn build_microvm_for_boot(
     attach_legacy_devices_aarch64(event_manager, &mut vmm, &mut boot_cmdline).map_err(Internal)?;
 
     attach_vmgenid_device(&mut vmm)?;
+
+    let entry_addr = load_kernel(boot_config, &vmm.guest_memfd)?;
+    let initrd = load_initrd_from_config(&vmm.guest_memory, boot_config, &vmm.guest_memfd)?;
 
     configure_system_for_boot(
         &mut vmm,
@@ -571,7 +573,7 @@ pub fn build_microvm_from_snapshot(
 
 fn load_kernel(
     boot_config: &BootConfig,
-    guest_memory: &GuestMemoryMmap,
+    guest_memfd: &GuestMemfd,
 ) -> Result<GuestAddress, StartMicrovmError> {
     let mut kernel_file = boot_config
         .kernel_file
@@ -588,8 +590,8 @@ fn load_kernel(
     .map_err(StartMicrovmError::KernelLoader)?;
 
     #[cfg(target_arch = "aarch64")]
-    let entry_addr = Loader::load::<std::fs::File, GuestMemoryMmap>(
-        guest_memory,
+    let entry_addr = Loader::load::<std::fs::File, _>(
+        guest_memfd,
         Some(GuestAddress(crate::arch::get_kernel_start())),
         &mut kernel_file,
         None,
@@ -600,14 +602,16 @@ fn load_kernel(
 }
 
 fn load_initrd_from_config(
-    boot_cfg: &BootConfig,
     vm_memory: &GuestMemoryMmap,
+    boot_cfg: &BootConfig,
+    guest_memfd: &GuestMemfd,
 ) -> Result<Option<InitrdConfig>, StartMicrovmError> {
     use self::StartMicrovmError::InitrdRead;
 
     Ok(match &boot_cfg.initrd_file {
         Some(f) => Some(load_initrd(
             vm_memory,
+            guest_memfd,
             &mut f.try_clone().map_err(InitrdRead)?,
         )?),
         None => None,
@@ -622,6 +626,7 @@ fn load_initrd_from_config(
 /// Returns the result of initrd loading
 fn load_initrd<F>(
     vm_memory: &GuestMemoryMmap,
+    guest_memfd: &GuestMemfd,
     image: &mut F,
 ) -> Result<InitrdConfig, StartMicrovmError>
 where
@@ -647,13 +652,7 @@ where
     // Get the target address
     let address = crate::arch::initrd_load_addr(vm_memory, size).map_err(|_| InitrdLoad)?;
 
-    // Load the image into memory
-    let mut slice = vm_memory
-        .get_slice(GuestAddress(address), size)
-        .map_err(|_| InitrdLoad)?;
-
-    image
-        .read_exact_volatile(&mut slice)
+    guest_memfd.read_volatile_from(GuestAddress(address), image, size)
         .map_err(|_| InitrdLoad)?;
 
     Ok(InitrdConfig {
@@ -848,6 +847,7 @@ pub fn configure_system_for_boot(
             .collect();
         let cmdline = boot_cmdline.as_cstring()?;
         crate::arch::aarch64::configure_system(
+            &vmm.guest_memfd,
             &vmm.guest_memory,
             cmdline,
             vcpu_mpidr,
