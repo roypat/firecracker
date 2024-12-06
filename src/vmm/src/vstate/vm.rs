@@ -9,16 +9,17 @@
 use std::fmt;
 use std::fs::File;
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::sync::Arc;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, CpuId, MsrList,
     KVM_CLOCK_TSC_STABLE, KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE,
     KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY,
 };
-use kvm_bindings::{kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region2, KVM_API_VERSION, KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES};
+use kvm_bindings::{kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region, kvm_userspace_memory_region2, KVM_API_VERSION, KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES};
 use kvm_ioctls::{Cap, Kvm, VmFd};
 use serde::{Deserialize, Serialize};
-
+use vm_memory::mmap::MmapRegionBuilder;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::GICDevice;
 #[cfg(target_arch = "aarch64")]
@@ -26,7 +27,7 @@ use crate::arch::aarch64::gic::GicState;
 use crate::cpu_config::templates::KvmCapability;
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{Address, GuestMemfd, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use crate::vstate::memory::{Address, GuestMemfd, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestMmapRegion, GuestRegionMmap};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -266,6 +267,19 @@ impl Vm {
                 self.fd.set_memory_attributes(attributes)
             })
             .map_err(VmError::SetUserMemoryRegion)?;
+
+        let dma_region = MmapRegionBuilder::new(16 << 20).build().unwrap();
+
+        let memory_region = kvm_userspace_memory_region {
+            slot: guest_mem.num_regions() as _ ,
+            flags: 0,
+            guest_phys_addr: guest_mem.last_addr().0 + 1,
+            memory_size: 16 << 20,
+            userspace_addr: dma_region.as_ptr() as _,
+        };
+        unsafe { self.fd.set_user_memory_region(memory_region).map_err(VmError::SetUserMemoryRegion)? };
+
+        guest_mem.insert_region(Arc::new(GuestRegionMmap::new(dma_region, guest_mem.last_addr() + 1).unwrap())).unwrap();
         Ok(())
     }
 

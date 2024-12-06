@@ -124,13 +124,6 @@ pub trait GuestMemoryExtension
 where
     Self: Sized,
 {
-    /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(
-        mem_size_mib: usize,
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError>;
-
     /// Creates a GuestMemoryMmap from raw regions.
     fn from_raw_regions(
         regions: &[(GuestAddress, usize)],
@@ -198,28 +191,6 @@ pub struct GuestMemoryState {
 }
 
 impl GuestMemoryExtension for GuestMemoryMmap {
-    /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(
-        mem_size_mib: usize,
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError> {
-        let memfd_file = create_memfd(mem_size_mib, huge_pages.into())?.into_file();
-
-        let mut offset: u64 = 0;
-        let regions = crate::arch::arch_memory_regions(mem_size_mib << 20)
-            .iter()
-            .map(|(guest_address, region_size)| {
-                let file_clone = memfd_file.try_clone().map_err(MemoryError::FileError)?;
-                let file_offset = FileOffset::new(file_clone, offset);
-                offset += *region_size as u64;
-                Ok((file_offset, *guest_address, *region_size))
-            })
-            .collect::<Result<Vec<_>, MemoryError>>()?;
-
-        Self::from_raw_regions_file(regions, track_dirty_pages, true)
-    }
-
     /// Creates a GuestMemoryMmap from raw regions backed by anonymous memory.
     fn from_raw_regions(
         regions: &[(GuestAddress, usize)],

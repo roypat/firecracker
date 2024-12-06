@@ -10,7 +10,7 @@ use std::ffi::CString;
 use std::fmt::Debug;
 
 use vm_fdt::{Error as VmFdtError, FdtWriter, FdtWriterNode};
-use vm_memory::GuestMemoryError;
+use vm_memory::{GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, InitrdConfig};
 use super::cache_info::{read_cache_config, CacheEntry};
@@ -220,6 +220,8 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
     // for an explanation of this.
 
+    let dma_region = guest_mem.iter().last().unwrap();
+
     // On ARM we reserve some memory so that it can be utilized for devices like VMGenID to send
     // data to kernel drivers. The range of this memory is:
     //
@@ -231,6 +233,7 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     let mem_size = guest_mem.last_addr().raw_value()
         - super::layout::DRAM_MEM_START
         - super::layout::SYSTEM_MEM_SIZE
+        - dma_region.len()
         + 1;
     let mem_reg_prop = &[
         super::layout::DRAM_MEM_START + super::layout::SYSTEM_MEM_SIZE,
@@ -240,6 +243,17 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     fdt.property_string("device_type", "memory")?;
     fdt.property_array_u64("reg", mem_reg_prop)?;
     fdt.end_node(mem)?;
+
+    let rmem = fdt.begin_node("reserved-memory")?;
+    fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
+    fdt.property_u32("#size-cells", SIZE_CELLS)?;
+    fdt.property_null("ranges")?;
+    let dma = fdt.begin_node("linux,dma")?;
+    fdt.property_string("compatible", "shared-dma-pool")?;
+    fdt.property_null("linux,dma-default")?;
+    fdt.property_array_u64("reg", &[dma_region.start_addr().0, dma_region.len()])?;
+    fdt.end_node(dma)?;
+    fdt.end_node(rmem)?;
 
     Ok(())
 }
