@@ -16,6 +16,7 @@ use super::super::{DeviceType, InitrdConfig};
 use super::cache_info::{read_cache_config, CacheEntry};
 use super::gic::GICDevice;
 use crate::devices::acpi::vmgenid::{VmGenId, VMGENID_MEM_SIZE};
+use crate::logger;
 use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
@@ -254,6 +255,8 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     fdt.property_array_u64("reg", &[dma_region.start_addr().0, dma_region.len()])?;
     fdt.end_node(dma)?;
     fdt.end_node(rmem)?;
+
+    logger::info!("Put DMA memory at [{}, {}]", dma_region.start_addr().0, dma_region.start_addr().0 + dma_region.len());
 
     Ok(())
 }

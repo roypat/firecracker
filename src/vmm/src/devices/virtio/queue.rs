@@ -8,7 +8,7 @@
 use std::cmp::min;
 use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
-
+use log::info;
 use crate::logger::error;
 use crate::vstate::memory::{Address, Bitmap, ByteValued, GuestAddress, GuestMemory};
 
@@ -445,6 +445,8 @@ impl Queue {
         let avail_ring_size = self.avail_ring_size();
         let used_ring = self.used_ring_address;
         let used_ring_size = self.used_ring_size();
+
+        info!("virtio desc_table at {:#x}, avail_ring at {:#x}, used_ring at {:#x}", desc_table.0, avail_ring.0, used_ring.0);
 
         if !self.ready {
             error!("attempt to use virtio queue that is not marked ready");
