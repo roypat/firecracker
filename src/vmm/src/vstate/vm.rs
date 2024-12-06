@@ -212,7 +212,7 @@ impl Vm {
     /// Initializes the guest memory.
     pub fn memory_init(
         &self,
-        guest_mem: &GuestMemoryMmap,
+        guest_mem: &mut GuestMemoryMmap,
         track_dirty_pages: bool,
     ) -> Result<GuestMemfd, VmError> {
         if guest_mem.num_regions() > self.max_memslots {
@@ -233,7 +233,7 @@ impl Vm {
     pub(crate) fn set_kvm_memory_regions(
         &self,
         guest_memfd: &GuestMemfd,
-        guest_mem: &GuestMemoryMmap,
+        guest_mem: &mut GuestMemoryMmap,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
         let mut flags = KVM_MEM_GUEST_MEMFD;
@@ -268,18 +268,19 @@ impl Vm {
             })
             .map_err(VmError::SetUserMemoryRegion)?;
 
-        let dma_region = MmapRegionBuilder::new(16 << 20).build().unwrap();
+        let dma_region = MmapRegionBuilder::new(16 << 20).with_mmap_prot(libc::PROT_READ | libc::PROT_WRITE).with_mmap_flags(libc::MAP_NORESERVE | libc::MAP_PRIVATE | libc::MAP_ANONYMOUS).build().unwrap();
+        let region_mmap = GuestRegionMmap::new(dma_region, guest_mem.last_addr().unchecked_add(1)).unwrap();
 
         let memory_region = kvm_userspace_memory_region {
             slot: guest_mem.num_regions() as _ ,
             flags: 0,
-            guest_phys_addr: guest_mem.last_addr().0 + 1,
-            memory_size: 16 << 20,
-            userspace_addr: dma_region.as_ptr() as _,
+            guest_phys_addr: region_mmap.start_addr().0 as _,
+            memory_size: region_mmap.size() as _,
+            userspace_addr: region_mmap.as_ptr() as _,
         };
         unsafe { self.fd.set_user_memory_region(memory_region).map_err(VmError::SetUserMemoryRegion)? };
 
-        guest_mem.insert_region(Arc::new(GuestRegionMmap::new(dma_region, guest_mem.last_addr() + 1).unwrap())).unwrap();
+        *guest_mem = guest_mem.insert_region(Arc::new(region_mmap)).unwrap();
         Ok(())
     }
 

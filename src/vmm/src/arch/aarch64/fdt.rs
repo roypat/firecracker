@@ -234,7 +234,6 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     let mem_size = guest_mem.last_addr().raw_value()
         - super::layout::DRAM_MEM_START
         - super::layout::SYSTEM_MEM_SIZE
-        - dma_region.len()
         + 1;
     let mem_reg_prop = &[
         super::layout::DRAM_MEM_START + super::layout::SYSTEM_MEM_SIZE,
@@ -249,14 +248,15 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Resul
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
     fdt.property_null("ranges")?;
-    let dma = fdt.begin_node("linux,dma")?;
-    fdt.property_string("compatible", "shared-dma-pool")?;
-    fdt.property_null("linux,dma-default")?;
+    let dma = fdt.begin_node("bouncy_boi")?;
+    fdt.property_string("compatible", "restricted-dma-pool")?;
+    //fdt.property_null("linux,dma-default")?;
+    fdt.property_phandle(2000)?;
     fdt.property_array_u64("reg", &[dma_region.start_addr().0, dma_region.len()])?;
     fdt.end_node(dma)?;
     fdt.end_node(rmem)?;
 
-    logger::info!("Put DMA memory at [{}, {}]", dma_region.start_addr().0, dma_region.start_addr().0 + dma_region.len());
+    logger::info!("Put DMA memory at [{:#x}, {:#x}]", dma_region.start_addr().0, dma_region.start_addr().0 + dma_region.len());
 
     Ok(())
 }
@@ -386,6 +386,7 @@ fn create_virtio_node<T: DeviceInfoForFDT + Clone + Debug>(
 
     fdt.property_string("compatible", "virtio,mmio")?;
     fdt.property_array_u64("reg", &[dev_info.addr(), dev_info.length()])?;
+    fdt.property_u32("memory-region", 2000)?;
     fdt.property_array_u32(
         "interrupts",
         &[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING],

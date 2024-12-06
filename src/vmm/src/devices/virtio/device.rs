@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-
+use log::info;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::mmio::{VIRTIO_MMIO_INT_CONFIG, VIRTIO_MMIO_INT_VRING};
@@ -154,6 +154,7 @@ pub trait VirtioDevice: AsAny + Send {
 
         // Check if the guest is ACK'ing a feature that we didn't claim to have.
         let avail_features = self.avail_features();
+        info!("Offered features {:#b}, got acknowledgement for {:#b} for device #{}", avail_features, v, self.device_type());
         let unrequested_features = v & !avail_features;
         if unrequested_features != 0 {
             warn!("Received acknowledge request for unknown feature: {:#x}", v);
