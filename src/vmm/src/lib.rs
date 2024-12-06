@@ -637,23 +637,27 @@ impl Vmm {
             .attributes_bitmap()
             .expect("I desire the guest_memfd, father");
 
-        self.guest_memory.iter().for_each(|region| {
-            let address = region.start_addr().0;
-            let size = region.size();
-            let attrs = kvm_memory_attributes {
-                address,
-                size: size as u64,
-                attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-                ..Default::default()
-            };
+        // Skip the last region because it is dedicated to DMA and thus _should_ be shared.
+        self.guest_memory
+            .iter()
+            .take(self.guest_memory.num_regions() - 1)
+            .for_each(|region| {
+                let address = region.start_addr().0;
+                let size = region.size();
+                let attrs = kvm_memory_attributes {
+                    address,
+                    size: size as u64,
+                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    ..Default::default()
+                };
 
-            self.vm
-                .fd()
-                .set_memory_attributes(attrs)
-                .expect("setting memory attributes failed");
+                self.vm
+                    .fd()
+                    .set_memory_attributes(attrs)
+                    .expect("setting memory attributes failed");
 
-            bitmap.set_addr_range(address as _, size);
-        });
+                bitmap.set_addr_range(address as _, size);
+            });
     }
 
     /// Updates the path of the host file backing the emulated block device with id `drive_id`.

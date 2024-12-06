@@ -18,6 +18,9 @@ pub use aarch64::{
     layout::SYSTEM_MEM_START, ConfigurationError, MMIO_MEM_SIZE, MMIO_MEM_START,
 };
 
+/// The size of the shared DMA region used by swiotlb inside the guest
+pub const DMA_MEM_SIZE: usize = 16 << 20;
+
 /// Module for x86_64 related functionality.
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;

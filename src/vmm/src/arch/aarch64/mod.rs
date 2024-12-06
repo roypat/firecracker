@@ -21,7 +21,7 @@ use vm_memory::GuestMemoryError;
 
 pub use self::fdt::DeviceInfoForFDT;
 use self::gic::GICDevice;
-use crate::arch::DeviceType;
+use crate::arch::{DeviceType, DMA_MEM_SIZE};
 use crate::devices::acpi::vmgenid::VmGenId;
 use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemory, Memory};
 
@@ -45,7 +45,14 @@ pub const MMIO_MEM_SIZE: u64 = layout::DRAM_MEM_START - layout::MAPPED_IO_START;
 /// See [`layout`](layout) module for a drawing of the specific memory model for this platform.
 pub fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
     let dram_size = min(size, layout::DRAM_MEM_MAX_SIZE);
-    vec![(GuestAddress(layout::DRAM_MEM_START), dram_size)]
+    let general_purpose = dram_size - DMA_MEM_SIZE;
+    vec![
+        (GuestAddress(layout::DRAM_MEM_START), general_purpose),
+        (
+            GuestAddress(layout::DRAM_MEM_START + general_purpose as u64),
+            DMA_MEM_SIZE,
+        ),
+    ]
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -111,7 +118,11 @@ fn get_fdt_addr(mem: &Memory) -> u64 {
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.
 
-    if let Some(addr) = mem.last_addr().checked_sub(layout::FDT_MAX_SIZE as u64 - 1) {
+    if let Some(addr) = mem
+        .last_addr()
+        .checked_sub(layout::FDT_MAX_SIZE as u64 - 1)
+        .and_then(|addr| addr.checked_sub(DMA_MEM_SIZE as u64))
+    {
         if mem.address_in_range(addr) {
             return addr.raw_value();
         }

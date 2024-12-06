@@ -10,18 +10,22 @@ use std::ffi::CString;
 use std::fmt::Debug;
 
 use vm_fdt::{Error as VmFdtError, FdtWriter, FdtWriterNode};
-use vm_memory::GuestMemoryError;
+use vm_memory::{GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, InitrdConfig};
 use super::cache_info::{read_cache_config, CacheEntry};
 use super::gic::GICDevice;
 use crate::devices::acpi::vmgenid::{VmGenId, VMGENID_MEM_SIZE};
+use crate::logger;
 use crate::vstate::memory::{Address, GuestMemory, Memory};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
 // This is a value for uniquely identifying the FDT node containing the clock definition.
 const CLOCK_PHANDLE: u32 = 2;
+/// Unique identifier for the /reserved-memory node describing the memory region the guest
+/// is allowed to use for swiotlb
+const IO_MEM_PHANDLE: u32 = 3;
 // You may be wondering why this big value?
 // This phandle is used to uniquely identify the FDT nodes containing cache information. Each cpu
 // can have a variable number of caches, some of these caches may be shared with other cpus.
@@ -228,6 +232,9 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &Memory) -> Result<(), Fdt
     // The reason we do this is that Linux does not allow remapping system memory. However, without
     // remap, kernel drivers cannot get virtual addresses to read data from device memory. Leaving
     // this memory region out allows Linux kernel modules to remap and thus read this region.
+    //
+    // The generic memory description must include the range that we later declare as a reserved
+    // carve out.
     let mem_size = guest_mem.last_addr().raw_value()
         - super::layout::DRAM_MEM_START
         - super::layout::SYSTEM_MEM_SIZE
@@ -240,6 +247,25 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &Memory) -> Result<(), Fdt
     fdt.property_string("device_type", "memory")?;
     fdt.property_array_u64("reg", mem_reg_prop)?;
     fdt.end_node(mem)?;
+
+    // Assume the final memory region is the one we use for I/O
+    let dma_region = guest_mem.iter().last().unwrap();
+    let rmem = fdt.begin_node("reserved-memory")?;
+    fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
+    fdt.property_u32("#size-cells", SIZE_CELLS)?;
+    fdt.property_null("ranges")?;
+    let dma = fdt.begin_node("bouncy_boi")?;
+    fdt.property_string("compatible", "restricted-dma-pool")?;
+    fdt.property_phandle(IO_MEM_PHANDLE)?;
+    fdt.property_array_u64("reg", &[dma_region.start_addr().0, dma_region.len()])?;
+    fdt.end_node(dma)?;
+    fdt.end_node(rmem)?;
+
+    logger::info!(
+        "Put DMA memory at [{:#x}, {:#x}]",
+        dma_region.start_addr().0,
+        dma_region.start_addr().0 + dma_region.len()
+    );
 
     Ok(())
 }
@@ -369,6 +395,9 @@ fn create_virtio_node<T: DeviceInfoForFDT + Clone + Debug>(
 
     fdt.property_string("compatible", "virtio,mmio")?;
     fdt.property_array_u64("reg", &[dev_info.addr(), dev_info.length()])?;
+    // Force all virtio device to place their vrings and buffer into the dedicated I/O memory region
+    // that is backed by traditional memory (e.g. not secret-free).
+    fdt.property_u32("memory-region", IO_MEM_PHANDLE)?;
     fdt.property_array_u32(
         "interrupts",
         &[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING],
