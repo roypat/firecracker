@@ -120,6 +120,9 @@ pub struct MachineConfig {
     #[cfg(feature = "gdb")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gdb_socket_path: Option<String>,
+    /// Whether to run a secret free VM (where guest memory is protected from speculative execution
+    /// attacks)
+    pub secret_free: bool,
 }
 
 fn is_none_or_custom_template(template: &Option<CpuTemplateType>) -> bool {
@@ -160,6 +163,7 @@ impl Default for MachineConfig {
             huge_pages: HugePageConfig::None,
             #[cfg(feature = "gdb")]
             gdb_socket_path: None,
+            secret_free: false,
         }
     }
 }
@@ -195,6 +199,10 @@ pub struct MachineConfigUpdate {
     #[cfg(feature = "gdb")]
     #[serde(default)]
     pub gdb_socket_path: Option<String>,
+    /// Whether to run a secret free VM (where guest memory is protected from speculative execution
+    /// attacks)
+    #[serde(default)]
+    pub secret_free: Option<bool>,
 }
 
 impl MachineConfigUpdate {
@@ -217,6 +225,7 @@ impl From<MachineConfig> for MachineConfigUpdate {
             huge_pages: Some(cfg.huge_pages),
             #[cfg(feature = "gdb")]
             gdb_socket_path: cfg.gdb_socket_path,
+            secret_free: Some(cfg.secret_free),
         }
     }
 }
@@ -284,6 +293,7 @@ impl MachineConfig {
             huge_pages: page_config,
             #[cfg(feature = "gdb")]
             gdb_socket_path: update.gdb_socket_path.clone(),
+            secret_free: update.secret_free.unwrap_or(self.secret_free),
         })
     }
 }

@@ -152,9 +152,10 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 fn create_vmm_and_vcpus(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
-    guest_memory: Memory,
+    mut guest_memory: Memory,
     uffd: Option<Uffd>,
     track_dirty_pages: bool,
+    secret_free: bool,
     vcpu_count: u8,
     kvm_capabilities: Vec<KvmCapability>,
 ) -> Result<(Vmm, Vec<Vcpu>), StartMicrovmError> {
@@ -165,6 +166,15 @@ fn create_vmm_and_vcpus(
     let mut vm = Vm::new(kvm_capabilities)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
+
+    if secret_free {
+        let gmem = vm
+            .create_guest_memfd(guest_memory.size() as usize)
+            .map_err(VmmError::Vm)
+            .map_err(StartMicrovmError::Internal)?;
+        guest_memory.set_guest_memfd(gmem);
+    }
+
     vm.memory_init(&guest_memory, track_dirty_pages)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
@@ -267,9 +277,6 @@ pub fn build_microvm_for_boot(
     let guest_memory = vm_resources
         .allocate_guest_memory()
         .map_err(StartMicrovmError::GuestMemory)?;
-
-    let entry_addr = load_kernel(boot_config, &guest_memory)?;
-    let initrd = load_initrd_from_config(boot_config, &guest_memory)?;
     // Clone the command-line so that a failed boot doesn't pollute the original.
     #[allow(unused_mut)]
     let mut boot_cmdline = boot_config.cmdline.clone();
@@ -285,9 +292,17 @@ pub fn build_microvm_for_boot(
         guest_memory,
         None,
         vm_resources.machine_config.track_dirty_pages,
+        vm_resources.machine_config.secret_free,
         vm_resources.machine_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
     )?;
+
+    if vm_resources.machine_config.secret_free {
+        vmm.set_guest_memory_private();
+    }
+
+    let entry_addr = load_kernel(boot_config, &vmm.guest_memory)?;
+    let initrd = load_initrd_from_config(boot_config, &vmm.guest_memory)?;
 
     #[cfg(feature = "gdb")]
     let (gdb_tx, gdb_rx) = mpsc::channel();
@@ -475,6 +490,7 @@ pub fn build_microvm_from_snapshot(
         guest_memory,
         uffd,
         vm_resources.machine_config.track_dirty_pages,
+        false,
         vm_resources.machine_config.vcpu_count,
         microvm_state.vm_state.kvm_cap_modifiers.clone(),
     )?;

@@ -436,6 +436,7 @@ pub fn restore_from_snapshot(
             huge_pages: Some(microvm_state.vm_info.huge_pages),
             #[cfg(feature = "gdb")]
             gdb_socket_path: None,
+            secret_free: Some(false),
         })
         .map_err(BuildMicrovmFromSnapshotError::VmUpdateConfig)?;
 
