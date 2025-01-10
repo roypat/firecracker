@@ -199,6 +199,19 @@ impl Runtime {
             panic!("mmap on backing file failed");
         }
 
+        let peer_creds = peer_process_credentials(&stream);
+
+        let default_panic_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let r = unsafe { libc::kill(peer_creds.pid, libc::SIGKILL) };
+
+            if r != 0 {
+                eprintln!("Failed to kill Firecracker process from panic hook");
+            }
+
+            default_panic_hook(panic_info);
+        }));
+
         Self {
             stream,
             backing_file,
@@ -329,6 +342,28 @@ fn create_mem_regions(mappings: &Vec<GuestRegionUffdMapping>, page_size: usize) 
     }
 
     mem_regions
+}
+
+fn peer_process_credentials(stream: &UnixStream) -> libc::ucred {
+    let mut creds: libc::ucred = libc::ucred {
+        pid: 0,
+        gid: 0,
+        uid: 0,
+    };
+    let mut creds_size = size_of::<libc::ucred>() as u32;
+    let ret = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut creds as *mut _ as *mut _,
+            &mut creds_size as *mut libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        panic!("Failed to get peer process credentials");
+    }
+    creds
 }
 
 #[cfg(test)]
