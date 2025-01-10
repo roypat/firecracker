@@ -28,9 +28,7 @@ use linux_loader::loader::bootparam::boot_params;
 use crate::arch::InitrdConfig;
 use crate::device_manager::resources::ResourceAllocator;
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{
-    Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
-};
+use crate::vstate::memory::{Address, GuestAddress, GuestMemory, GuestMemoryRegion, Memory};
 
 // Value taken from https://elixir.bootlin.com/linux/v5.10.68/source/arch/x86/include/uapi/asm/e820.h#L31
 // Usable normal RAM
@@ -84,10 +82,7 @@ pub fn get_kernel_start() -> u64 {
 }
 
 /// Returns the memory address where the initrd could be loaded.
-pub fn initrd_load_addr(
-    guest_mem: &GuestMemoryMmap,
-    initrd_size: usize,
-) -> Result<u64, ConfigurationError> {
+pub fn initrd_load_addr(guest_mem: &Memory, initrd_size: usize) -> Result<u64, ConfigurationError> {
     let first_region = guest_mem
         .find_region(GuestAddress::new(0))
         .ok_or(ConfigurationError::InitrdAddress)?;
@@ -111,7 +106,7 @@ pub fn initrd_load_addr(
 /// * `initrd` - Information about where the ramdisk image was loaded in the `guest_mem`.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 pub fn configure_system(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &Memory,
     resource_allocator: &mut ResourceAllocator,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,

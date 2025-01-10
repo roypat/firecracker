@@ -28,7 +28,7 @@ use crate::vmm_config::metrics::{init_metrics, MetricsConfig, MetricsConfigError
 use crate::vmm_config::mmds::{MmdsConfig, MmdsConfigError};
 use crate::vmm_config::net::*;
 use crate::vmm_config::vsock::*;
-use crate::vstate::memory::{GuestMemoryExtension, GuestMemoryMmap, MemoryError};
+use crate::vstate::memory::{Memory, MemoryError};
 
 /// Errors encountered when configuring microVM resources.
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -465,7 +465,7 @@ impl VmResources {
     ///
     /// If vhost-user-blk devices are in use, allocates memfd-backed shared memory, otherwise
     /// prefers anonymous memory for performance reasons.
-    pub fn allocate_guest_memory(&self) -> Result<GuestMemoryMmap, MemoryError> {
+    pub fn allocate_guest_memory(&self) -> Result<Memory, MemoryError> {
         let vhost_user_device_used = self
             .block
             .devices
@@ -482,14 +482,14 @@ impl VmResources {
         // a single way of backing guest memory for vhost-user and non-vhost-user cases,
         // that would not be worth the effort.
         if vhost_user_device_used {
-            GuestMemoryMmap::memfd_backed(
+            Memory::memfd_backed(
                 self.machine_config.mem_size_mib,
                 self.machine_config.track_dirty_pages,
                 self.machine_config.huge_pages,
             )
         } else {
             let regions = crate::arch::arch_memory_regions(self.machine_config.mem_size_mib << 20);
-            GuestMemoryMmap::from_raw_regions(
+            Memory::from_raw_regions(
                 &regions,
                 self.machine_config.track_dirty_pages,
                 self.machine_config.huge_pages,

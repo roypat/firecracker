@@ -55,49 +55,44 @@ pub enum MemoryError {
     HugetlbfsSnapshot,
 }
 
+/// Struct encapsulating everything needed for managing Firecracker guest memory
+#[derive(Debug)]
+pub struct Memory {
+    /// The shared part of guest memory (either anonymous memory or a mmap'd memfd)
+    pub shared: GuestMemoryMmap,
+}
+
+impl GuestMemory for Memory {
+    type R = GuestRegionMmap;
+
+    fn num_regions(&self) -> usize {
+        self.shared.num_regions()
+    }
+
+    fn find_region(&self, addr: GuestAddress) -> Option<&Self::R> {
+        self.shared.find_region(addr)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Self::R> {
+        self.shared.iter()
+    }
+}
+
 /// Defines the interface for snapshotting memory.
 pub trait GuestMemoryExtension
 where
     Self: Sized,
 {
-    /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(
-        mem_size_mib: usize,
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError>;
+    /// Creates a GuestMemoryMmap given a `file` containing the data
+    /// and a `state` containing mapping information.
 
-    /// Creates a GuestMemoryMmap from raw regions.
-    fn from_raw_regions(
-        regions: &[(GuestAddress, usize)],
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError>;
-
-    /// Creates a GuestMemoryMmap from raw regions.
     fn from_raw_regions_file(
         regions: Vec<(FileOffset, GuestAddress, usize)>,
         track_dirty_pages: bool,
         shared: bool,
     ) -> Result<Self, MemoryError>;
-
-    /// Creates a GuestMemoryMmap given a `file` containing the data
-    /// and a `state` containing mapping information.
-    fn from_state(
-        file: Option<&File>,
-        state: &GuestMemoryState,
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError>;
-
-    /// Describes GuestMemoryMmap through a GuestMemoryState struct.
-    fn describe(&self) -> GuestMemoryState;
-
     /// Mark memory range as dirty
     fn mark_dirty(&self, addr: GuestAddress, len: usize);
-
-    /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError>;
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.
     fn dump_dirty<T: WriteVolatile + std::io::Seek>(
@@ -133,9 +128,14 @@ pub struct GuestMemoryState {
     pub regions: Vec<GuestMemoryRegionState>,
 }
 
-impl GuestMemoryExtension for GuestMemoryMmap {
+impl Memory {
+    /// Returns the size of guest memory, in MiB.
+    pub fn size_mib(&self) -> u64 {
+        self.shared.iter().map(|region| region.len()).sum::<u64>() >> 20
+    }
+
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(
+    pub fn memfd_backed(
         mem_size_mib: usize,
         track_dirty_pages: bool,
         huge_pages: HugePageConfig,
@@ -153,11 +153,12 @@ impl GuestMemoryExtension for GuestMemoryMmap {
             })
             .collect::<Result<Vec<_>, MemoryError>>()?;
 
-        Self::from_raw_regions_file(regions, track_dirty_pages, true)
+        GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, true)
+            .map(|shared| Memory { shared })
     }
 
     /// Creates a GuestMemoryMmap from raw regions backed by anonymous memory.
-    fn from_raw_regions(
+    pub fn from_raw_regions(
         regions: &[(GuestAddress, usize)],
         track_dirty_pages: bool,
         huge_pages: HugePageConfig,
@@ -188,9 +189,77 @@ impl GuestMemoryExtension for GuestMemoryMmap {
             })
             .collect::<Result<Vec<_>, MemoryError>>()?;
 
-        GuestMemoryMmap::from_regions(regions).map_err(MemoryError::VmMemoryError)
+        GuestMemoryMmap::from_regions(regions)
+            .map_err(MemoryError::VmMemoryError)
+            .map(|shared| Memory { shared })
     }
 
+    /// Creates a GuestMemoryMmap backed by a `file` if present, otherwise backed
+    /// by anonymous memory. Memory layout and ranges are described in `state` param.
+    pub fn from_state(
+        file: Option<&File>,
+        state: &GuestMemoryState,
+        track_dirty_pages: bool,
+        huge_pages: HugePageConfig,
+    ) -> Result<Self, MemoryError> {
+        match file {
+            Some(f) => {
+                if huge_pages.is_hugetlbfs() {
+                    return Err(MemoryError::HugetlbfsSnapshot);
+                }
+
+                let regions = state
+                    .regions
+                    .iter()
+                    .map(|r| {
+                        f.try_clone().map(|file_clone| {
+                            let offset = FileOffset::new(file_clone, r.offset);
+                            (offset, GuestAddress(r.base_address), r.size)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, std::io::Error>>()
+                    .map_err(MemoryError::FileError)?;
+
+                GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, false)
+                    .map(|shared| Memory { shared })
+            }
+            None => {
+                let regions = state
+                    .regions
+                    .iter()
+                    .map(|r| (GuestAddress(r.base_address), r.size))
+                    .collect::<Vec<_>>();
+                Self::from_raw_regions(&regions, track_dirty_pages, huge_pages)
+            }
+        }
+    }
+
+    /// Describes GuestMemoryMmap through a GuestMemoryState struct.
+    pub fn describe(&self) -> GuestMemoryState {
+        let mut guest_memory_state = GuestMemoryState::default();
+        let mut offset = 0;
+        self.shared.iter().for_each(|region| {
+            guest_memory_state.regions.push(GuestMemoryRegionState {
+                base_address: region.start_addr().0,
+                size: u64_to_usize(region.len()),
+                offset,
+            });
+
+            offset += region.len();
+        });
+        guest_memory_state
+    }
+
+    /// Dumps all contents of GuestMemoryMmap to a writer.
+    pub fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError> {
+        self.shared
+            .iter()
+            .try_for_each(|region| Ok(writer.write_all_volatile(&region.as_volatile_slice()?)?))
+            .map_err(MemoryError::WriteMemory)
+    }
+}
+
+impl GuestMemoryExtension for GuestMemoryMmap {
     /// Creates a GuestMemoryMmap from raw regions backed by file.
     fn from_raw_regions_file(
         regions: Vec<(FileOffset, GuestAddress, usize)>,
@@ -224,61 +293,6 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         GuestMemoryMmap::from_regions(regions).map_err(MemoryError::VmMemoryError)
     }
 
-    /// Creates a GuestMemoryMmap backed by a `file` if present, otherwise backed
-    /// by anonymous memory. Memory layout and ranges are described in `state` param.
-    fn from_state(
-        file: Option<&File>,
-        state: &GuestMemoryState,
-        track_dirty_pages: bool,
-        huge_pages: HugePageConfig,
-    ) -> Result<Self, MemoryError> {
-        match file {
-            Some(f) => {
-                if huge_pages.is_hugetlbfs() {
-                    return Err(MemoryError::HugetlbfsSnapshot);
-                }
-
-                let regions = state
-                    .regions
-                    .iter()
-                    .map(|r| {
-                        f.try_clone().map(|file_clone| {
-                            let offset = FileOffset::new(file_clone, r.offset);
-                            (offset, GuestAddress(r.base_address), r.size)
-                        })
-                    })
-                    .collect::<Result<Vec<_>, std::io::Error>>()
-                    .map_err(MemoryError::FileError)?;
-
-                Self::from_raw_regions_file(regions, track_dirty_pages, false)
-            }
-            None => {
-                let regions = state
-                    .regions
-                    .iter()
-                    .map(|r| (GuestAddress(r.base_address), r.size))
-                    .collect::<Vec<_>>();
-                Self::from_raw_regions(&regions, track_dirty_pages, huge_pages)
-            }
-        }
-    }
-
-    /// Describes GuestMemoryMmap through a GuestMemoryState struct.
-    fn describe(&self) -> GuestMemoryState {
-        let mut guest_memory_state = GuestMemoryState::default();
-        let mut offset = 0;
-        self.iter().for_each(|region| {
-            guest_memory_state.regions.push(GuestMemoryRegionState {
-                base_address: region.start_addr().0,
-                size: u64_to_usize(region.len()),
-                offset,
-            });
-
-            offset += region.len();
-        });
-        guest_memory_state
-    }
-
     /// Mark memory range as dirty
     fn mark_dirty(&self, addr: GuestAddress, len: usize) {
         let _ = self.try_access(len, addr, |_total, count, caddr, region| {
@@ -287,13 +301,6 @@ impl GuestMemoryExtension for GuestMemoryMmap {
             }
             Ok(count)
         });
-    }
-
-    /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError> {
-        self.iter()
-            .try_for_each(|region| Ok(writer.write_all_volatile(&region.as_volatile_slice()?)?))
-            .map_err(MemoryError::WriteMemory)
     }
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.

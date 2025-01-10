@@ -16,9 +16,7 @@ use vm_allocator::AllocPolicy;
 use crate::arch::x86_64::gen::mpspec;
 use crate::arch::IRQ_MAX;
 use crate::device_manager::resources::ResourceAllocator;
-use crate::vstate::memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap,
-};
+use crate::vstate::memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, Memory};
 
 // These `mpspec` wrapper types are only data, reading them from data is a safe initialization.
 // SAFETY: POD
@@ -115,7 +113,7 @@ fn compute_mp_size(num_cpus: u8) -> usize {
 
 /// Performs setup of the MP table for the given `num_cpus`.
 pub fn setup_mptable(
-    mem: &GuestMemoryMmap,
+    mem: &Memory,
     resource_allocator: &mut ResourceAllocator,
     num_cpus: u8,
 ) -> Result<(), MptableError> {

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::devices::virtio::queue::Queue;
 use crate::test_utils::single_region_mem;
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemoryMmap};
+use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemoryMmap, Memory};
 
 #[macro_export]
 macro_rules! check_metric_after_block {
@@ -24,7 +24,7 @@ macro_rules! check_metric_after_block {
 
 /// Creates a [`GuestMemoryMmap`] with a single region  of size 65536 (= 0x10000 hex) starting at
 /// guest physical address 0
-pub fn default_mem() -> GuestMemoryMmap {
+pub fn default_mem() -> Memory {
     single_region_mem(0x10000)
 }
 

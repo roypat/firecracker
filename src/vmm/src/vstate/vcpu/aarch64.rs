@@ -22,7 +22,7 @@ use crate::cpu_config::aarch64::custom_cpu_template::VcpuFeatures;
 use crate::cpu_config::templates::CpuConfiguration;
 use crate::logger::{error, IncMetric, METRICS};
 use crate::vcpu::{VcpuConfig, VcpuError};
-use crate::vstate::memory::{Address, GuestAddress, GuestMemoryMmap};
+use crate::vstate::memory::{Address, GuestAddress, Memory};
 use crate::vstate::vcpu::VcpuEmulation;
 use crate::vstate::vm::Vm;
 
@@ -112,7 +112,7 @@ impl KvmVcpu {
     /// * `vcpu_config` - The vCPU configuration.
     pub fn configure(
         &mut self,
-        guest_mem: &GuestMemoryMmap,
+        guest_mem: &Memory,
         kernel_load_addr: GuestAddress,
         vcpu_config: &VcpuConfig,
     ) -> Result<(), KvmVcpuError> {

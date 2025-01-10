@@ -147,9 +147,7 @@ use crate::rate_limiter::BucketUpdate;
 use crate::snapshot::Persist;
 use crate::utils::u64_to_usize;
 use crate::vmm_config::instance_info::{InstanceInfo, VmState};
-use crate::vstate::memory::{
-    GuestMemory, GuestMemoryExtension, GuestMemoryMmap, GuestMemoryRegion,
-};
+use crate::vstate::memory::{GuestMemory, GuestMemoryRegion, Memory};
 use crate::vstate::vcpu::VcpuState;
 pub use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuEvent, VcpuHandle, VcpuResponse};
 pub use crate::vstate::vm::Vm;
@@ -266,11 +264,6 @@ pub enum VmmError {
 /// Shorthand type for KVM dirty page bitmap.
 pub type DirtyBitmap = HashMap<usize, Vec<u64>>;
 
-/// Returns the size of guest memory, in MiB.
-pub(crate) fn mem_size_mib(guest_memory: &GuestMemoryMmap) -> u64 {
-    guest_memory.iter().map(|region| region.len()).sum::<u64>() >> 20
-}
-
 // Error type for [`Vmm::emulate_serial_init`].
 /// Emulate serial init error: {0}
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -308,7 +301,7 @@ pub struct Vmm {
 
     // Guest VM core resources.
     vm: Vm,
-    guest_memory: GuestMemoryMmap,
+    guest_memory: Memory,
     // Save UFFD in order to keep it open in the Firecracker process, as well.
     // Since this field is never read again, we need to allow `dead_code`.
     #[allow(dead_code)]
@@ -445,7 +438,7 @@ impl Vmm {
     }
 
     /// Returns a reference to the inner `GuestMemoryMmap` object.
-    pub fn guest_memory(&self) -> &GuestMemoryMmap {
+    pub fn guest_memory(&self) -> &Memory {
         &self.guest_memory
     }
 
@@ -751,7 +744,7 @@ impl Vmm {
     pub fn update_balloon_config(&mut self, amount_mib: u32) -> Result<(), BalloonError> {
         // The balloon cannot have a target size greater than the size of
         // the guest memory.
-        if u64::from(amount_mib) > mem_size_mib(self.guest_memory()) {
+        if u64::from(amount_mib) > self.guest_memory().size_mib() {
             return Err(BalloonError::TooManyPagesRequested);
         }
 

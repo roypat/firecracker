@@ -16,7 +16,7 @@ use super::super::{DeviceType, InitrdConfig};
 use super::cache_info::{read_cache_config, CacheEntry};
 use super::gic::GICDevice;
 use crate::devices::acpi::vmgenid::{VmGenId, VMGENID_MEM_SIZE};
-use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{Address, GuestMemory, Memory};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
@@ -65,7 +65,7 @@ pub enum FdtError {
 
 /// Creates the flattened device tree for this aarch64 microVM.
 pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &Memory,
     vcpu_mpidr: Vec<u64>,
     cmdline: CString,
     device_info: &HashMap<(DeviceType, String), T>,
@@ -216,7 +216,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> Result<(), FdtEr
     Ok(())
 }
 
-fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> Result<(), FdtError> {
+fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &Memory) -> Result<(), FdtError> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
     // for an explanation of this.
 

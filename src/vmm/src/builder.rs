@@ -68,7 +68,7 @@ use crate::utils::u64_to_usize;
 use crate::vmm_config::boot_source::BootConfig;
 use crate::vmm_config::instance_info::InstanceInfo;
 use crate::vmm_config::machine_config::{MachineConfig, MachineConfigError};
-use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{GuestAddress, GuestMemory, Memory};
 use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuError};
 use crate::vstate::vm::Vm;
 use crate::{device_manager, EventManager, Vmm, VmmError};
@@ -152,7 +152,7 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 fn create_vmm_and_vcpus(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
-    guest_memory: GuestMemoryMmap,
+    guest_memory: Memory,
     uffd: Option<Uffd>,
     track_dirty_pages: bool,
     vcpu_count: u8,
@@ -462,7 +462,7 @@ pub fn build_microvm_from_snapshot(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
     microvm_state: MicrovmState,
-    guest_memory: GuestMemoryMmap,
+    guest_memory: Memory,
     uffd: Option<Uffd>,
     seccomp_filters: &BpfThreadMap,
     vm_resources: &mut VmResources,
@@ -517,7 +517,7 @@ pub fn build_microvm_from_snapshot(
 
     // Restore devices states.
     let mmio_ctor_args = MMIODevManagerConstructorArgs {
-        mem: &vmm.guest_memory,
+        mem: &vmm.guest_memory.shared,
         vm: vmm.vm.fd(),
         event_manager,
         resource_allocator: &mut vmm.resource_allocator,
@@ -574,7 +574,7 @@ pub fn build_microvm_from_snapshot(
 
 fn load_kernel(
     boot_config: &BootConfig,
-    guest_memory: &GuestMemoryMmap,
+    guest_memory: &Memory,
 ) -> Result<GuestAddress, StartMicrovmError> {
     let mut kernel_file = boot_config
         .kernel_file
@@ -582,7 +582,7 @@ fn load_kernel(
         .map_err(|err| StartMicrovmError::Internal(VmmError::KernelFile(err)))?;
 
     #[cfg(target_arch = "x86_64")]
-    let entry_addr = Loader::load::<std::fs::File, GuestMemoryMmap>(
+    let entry_addr = Loader::load(
         guest_memory,
         None,
         &mut kernel_file,
@@ -591,7 +591,7 @@ fn load_kernel(
     .map_err(StartMicrovmError::KernelLoader)?;
 
     #[cfg(target_arch = "aarch64")]
-    let entry_addr = Loader::load::<std::fs::File, GuestMemoryMmap>(
+    let entry_addr = Loader::load(
         guest_memory,
         Some(GuestAddress(crate::arch::get_kernel_start())),
         &mut kernel_file,
@@ -604,7 +604,7 @@ fn load_kernel(
 
 fn load_initrd_from_config(
     boot_cfg: &BootConfig,
-    vm_memory: &GuestMemoryMmap,
+    vm_memory: &Memory,
 ) -> Result<Option<InitrdConfig>, StartMicrovmError> {
     use self::StartMicrovmError::InitrdRead;
 
@@ -623,10 +623,7 @@ fn load_initrd_from_config(
 /// * `image` - The initrd image.
 ///
 /// Returns the result of initrd loading
-fn load_initrd<F>(
-    vm_memory: &GuestMemoryMmap,
-    image: &mut F,
-) -> Result<InitrdConfig, StartMicrovmError>
+fn load_initrd<F>(vm_memory: &Memory, image: &mut F) -> Result<InitrdConfig, StartMicrovmError>
 where
     F: ReadVolatile + Seek + Debug,
 {
@@ -817,7 +814,7 @@ pub fn configure_system_for_boot(
             .as_cstring()
             .map(|cmdline_cstring| cmdline_cstring.as_bytes_with_nul().len())?;
 
-        linux_loader::loader::load_cmdline::<crate::vstate::memory::GuestMemoryMmap>(
+        linux_loader::loader::load_cmdline(
             vmm.guest_memory(),
             GuestAddress(crate::arch::x86_64::layout::CMDLINE_START),
             &boot_cmdline,
@@ -878,7 +875,7 @@ fn attach_virtio_device<T: 'static + VirtioDevice + MutEventSubscriber + Debug>(
     event_manager.add_subscriber(device.clone());
 
     // The device mutex mustn't be locked here otherwise it will deadlock.
-    let device = MmioTransport::new(vmm.guest_memory().clone(), device, is_vhost_user);
+    let device = MmioTransport::new(vmm.guest_memory().shared.clone(), device, is_vhost_user);
     vmm.mmio_device_manager
         .register_mmio_virtio_for_boot(
             vmm.vm.fd(),

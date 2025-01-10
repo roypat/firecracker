@@ -25,7 +25,7 @@ use crate::arch::aarch64::gic::GicState;
 use crate::cpu_config::templates::KvmCapability;
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use crate::vstate::memory::{Address, GuestMemory, GuestMemoryRegion, Memory};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -207,11 +207,7 @@ impl Vm {
     }
 
     /// Initializes the guest memory.
-    pub fn memory_init(
-        &self,
-        guest_mem: &GuestMemoryMmap,
-        track_dirty_pages: bool,
-    ) -> Result<(), VmError> {
+    pub fn memory_init(&self, guest_mem: &Memory, track_dirty_pages: bool) -> Result<(), VmError> {
         if guest_mem.num_regions() > self.max_memslots {
             return Err(VmError::NotEnoughMemorySlots);
         }
@@ -226,7 +222,7 @@ impl Vm {
 
     pub(crate) fn set_kvm_memory_regions(
         &self,
-        guest_mem: &GuestMemoryMmap,
+        guest_mem: &Memory,
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
         let mut flags = 0u32;

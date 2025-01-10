@@ -23,7 +23,7 @@ pub use self::fdt::DeviceInfoForFDT;
 use self::gic::GICDevice;
 use crate::arch::DeviceType;
 use crate::devices::acpi::vmgenid::VmGenId;
-use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{Address, Bytes, GuestAddress, GuestMemory, Memory};
 
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -60,7 +60,7 @@ pub fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
 /// * `gic_device` - The GIC device.
 /// * `initrd` - Information about an optional initrd.
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
-    guest_mem: &GuestMemoryMmap,
+    guest_mem: &Memory,
     cmdline_cstring: CString,
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T>,
@@ -90,10 +90,7 @@ pub fn get_kernel_start() -> u64 {
 }
 
 /// Returns the memory address where the initrd could be loaded.
-pub fn initrd_load_addr(
-    guest_mem: &GuestMemoryMmap,
-    initrd_size: usize,
-) -> Result<u64, ConfigurationError> {
+pub fn initrd_load_addr(guest_mem: &Memory, initrd_size: usize) -> Result<u64, ConfigurationError> {
     let round_to_pagesize =
         |size| (size + (super::GUEST_PAGE_SIZE - 1)) & !(super::GUEST_PAGE_SIZE - 1);
     match GuestAddress(get_fdt_addr(guest_mem)).checked_sub(round_to_pagesize(initrd_size) as u64) {
@@ -109,7 +106,7 @@ pub fn initrd_load_addr(
 }
 
 // Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr(mem: &GuestMemoryMmap) -> u64 {
+fn get_fdt_addr(mem: &Memory) -> u64 {
     // If the memory allocated is smaller than the size allocated for the FDT,
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.

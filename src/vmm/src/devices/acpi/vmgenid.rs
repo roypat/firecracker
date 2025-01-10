@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::super::legacy::EventFdTrigger;
 use crate::device_manager::resources::ResourceAllocator;
 use crate::snapshot::Persist;
-use crate::vstate::memory::{Bytes, GuestMemoryMmap};
+use crate::vstate::memory::{Bytes, Memory};
 
 /// Bytes of memory we allocate for VMGenID device
 pub const VMGENID_MEM_SIZE: u64 = 16;
@@ -56,7 +56,7 @@ impl VmGenId {
     pub fn from_parts(
         guest_address: GuestAddress,
         gsi: u32,
-        mem: &GuestMemoryMmap,
+        mem: &Memory,
     ) -> Result<Self, VmGenIdError> {
         debug!(
             "vmgenid: building VMGenID device. Address: {:#010x}. IRQ: {}",
@@ -85,7 +85,7 @@ impl VmGenId {
     ///
     /// Allocate memory and a GSI for sending notifications and build the device
     pub fn new(
-        mem: &GuestMemoryMmap,
+        mem: &Memory,
         resource_allocator: &mut ResourceAllocator,
     ) -> Result<Self, VmGenIdError> {
         let gsi = resource_allocator.allocate_gsi(1)?;
@@ -132,7 +132,7 @@ pub struct VMGenIDState {
 
 #[derive(Debug)]
 pub struct VMGenIdConstructorArgs<'a> {
-    pub mem: &'a GuestMemoryMmap,
+    pub mem: &'a Memory,
     pub resource_allocator: &'a mut ResourceAllocator,
 }
 

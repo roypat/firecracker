@@ -12,7 +12,7 @@ use crate::acpi::x86_64::{
 use crate::device_manager::acpi::ACPIDeviceManager;
 use crate::device_manager::mmio::MMIODeviceManager;
 use crate::device_manager::resources::ResourceAllocator;
-use crate::vstate::memory::{GuestAddress, GuestMemoryMmap};
+use crate::vstate::memory::{GuestAddress, Memory};
 use crate::Vcpu;
 
 mod x86_64;
@@ -44,7 +44,7 @@ pub enum AcpiError {
 /// Helper type that holds the guest memory in which we write the tables in and a resource
 /// allocator for allocating space for the tables
 struct AcpiTableWriter<'a> {
-    mem: &'a GuestMemoryMmap,
+    mem: &'a Memory,
     resource_allocator: &'a mut ResourceAllocator,
 }
 
@@ -162,7 +162,7 @@ impl AcpiTableWriter<'_> {
 /// This will create the ACPI tables needed to describe to the guest OS the available hardware,
 /// such as interrupt controllers, vCPUs and VirtIO devices.
 pub(crate) fn create_acpi_tables(
-    mem: &GuestMemoryMmap,
+    mem: &Memory,
     resource_allocator: &mut ResourceAllocator,
     mmio_device_manager: &MMIODeviceManager,
     acpi_device_manager: &ACPIDeviceManager,

@@ -37,11 +37,11 @@ use crate::vmm_config::snapshot::{
     CreateSnapshotParams, LoadSnapshotParams, MemBackendType, SnapshotType,
 };
 use crate::vstate::memory::{
-    GuestMemory, GuestMemoryExtension, GuestMemoryMmap, GuestMemoryState, MemoryError,
+    GuestMemory, GuestMemoryExtension, GuestMemoryState, Memory, MemoryError,
 };
 use crate::vstate::vcpu::{VcpuSendEventError, VcpuState};
 use crate::vstate::vm::VmState;
-use crate::{mem_size_mib, vstate, EventManager, Vmm, VmmError};
+use crate::{vstate, EventManager, Vmm, VmmError};
 
 /// Holds information related to the VM that is not part of VmState.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -224,7 +224,7 @@ fn snapshot_memory_to_file(
         .map_err(|err| MemoryBackingFile("open", err))?;
 
     // Determine what size our total memory area is.
-    let mem_size_mib = mem_size_mib(vmm.guest_memory());
+    let mem_size_mib = vmm.guest_memory().size_mib();
     let expected_size = mem_size_mib * 1024 * 1024;
 
     if file_existed {
@@ -254,6 +254,7 @@ fn snapshot_memory_to_file(
         SnapshotType::Diff => {
             let dirty_bitmap = vmm.get_dirty_bitmap().map_err(DirtyBitmap)?;
             vmm.guest_memory()
+                .shared
                 .dump_dirty(&mut file, &dirty_bitmap)
                 .map_err(Memory)
         }
@@ -261,7 +262,7 @@ fn snapshot_memory_to_file(
             let dump_res = vmm.guest_memory().dump(&mut file).map_err(Memory);
             if dump_res.is_ok() {
                 vmm.reset_dirty_bitmap();
-                vmm.guest_memory().reset_dirty();
+                vmm.guest_memory().shared.reset_dirty();
             }
 
             dump_res
@@ -277,7 +278,7 @@ fn snapshot_memory_to_file(
         .for_each_virtio_device(|_, _, _, dev| {
             let d = dev.lock().unwrap();
             if d.is_activated() {
-                d.mark_queue_memory_dirty(vmm.guest_memory())
+                d.mark_queue_memory_dirty(&vmm.guest_memory().shared)
             } else {
                 Ok(())
             }
@@ -517,10 +518,9 @@ fn guest_memory_from_file(
     mem_state: &GuestMemoryState,
     track_dirty_pages: bool,
     huge_pages: HugePageConfig,
-) -> Result<GuestMemoryMmap, GuestMemoryFromFileError> {
+) -> Result<Memory, GuestMemoryFromFileError> {
     let mem_file = File::open(mem_file_path)?;
-    let guest_mem =
-        GuestMemoryMmap::from_state(Some(&mem_file), mem_state, track_dirty_pages, huge_pages)?;
+    let guest_mem = Memory::from_state(Some(&mem_file), mem_state, track_dirty_pages, huge_pages)?;
     Ok(guest_mem)
 }
 
@@ -545,7 +545,7 @@ fn guest_memory_from_uffd(
     track_dirty_pages: bool,
     enable_balloon: bool,
     huge_pages: HugePageConfig,
-) -> Result<(GuestMemoryMmap, Option<Uffd>), GuestMemoryFromUffdError> {
+) -> Result<(Memory, Option<Uffd>), GuestMemoryFromUffdError> {
     let (guest_memory, backend_mappings) =
         create_guest_memory(mem_state, track_dirty_pages, huge_pages)?;
 
@@ -578,8 +578,8 @@ fn create_guest_memory(
     mem_state: &GuestMemoryState,
     track_dirty_pages: bool,
     huge_pages: HugePageConfig,
-) -> Result<(GuestMemoryMmap, Vec<GuestRegionUffdMapping>), GuestMemoryFromUffdError> {
-    let guest_memory = GuestMemoryMmap::from_state(None, mem_state, track_dirty_pages, huge_pages)?;
+) -> Result<(Memory, Vec<GuestRegionUffdMapping>), GuestMemoryFromUffdError> {
+    let guest_memory = Memory::from_state(None, mem_state, track_dirty_pages, huge_pages)?;
     let mut backend_mappings = Vec::with_capacity(guest_memory.num_regions());
     for (mem_region, state_region) in guest_memory.iter().zip(mem_state.regions.iter()) {
         backend_mappings.push(GuestRegionUffdMapping {

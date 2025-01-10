@@ -13,7 +13,7 @@ use kvm_ioctls::VcpuFd;
 
 use super::get_fdt_addr;
 use super::regs::*;
-use crate::vstate::memory::GuestMemoryMmap;
+use crate::vstate::memory::Memory;
 
 /// Errors thrown while setting aarch64 registers.
 #[derive(Debug, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
@@ -77,7 +77,7 @@ pub fn setup_boot_regs(
     vcpufd: &VcpuFd,
     cpu_id: u8,
     boot_ip: u64,
-    mem: &GuestMemoryMmap,
+    mem: &Memory,
 ) -> Result<(), VcpuError> {
     let kreg_off = offset_of!(kvm_regs, regs);
 

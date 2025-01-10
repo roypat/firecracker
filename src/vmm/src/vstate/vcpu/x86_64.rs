@@ -23,7 +23,7 @@ use crate::arch::x86_64::msr::{create_boot_msr_entries, MsrError};
 use crate::arch::x86_64::regs::{SetupFpuError, SetupRegistersError, SetupSpecialRegistersError};
 use crate::cpu_config::x86_64::{cpuid, CpuConfiguration};
 use crate::logger::{IncMetric, METRICS};
-use crate::vstate::memory::{Address, GuestAddress, GuestMemoryMmap};
+use crate::vstate::memory::{Address, GuestAddress, Memory};
 use crate::vstate::vcpu::{VcpuConfig, VcpuEmulation};
 use crate::vstate::vm::Vm;
 
@@ -188,7 +188,7 @@ impl KvmVcpu {
     /// * `cpuid` - The capabilities exposed by this vCPU.
     pub fn configure(
         &mut self,
-        guest_mem: &GuestMemoryMmap,
+        guest_mem: &Memory,
         kernel_start_addr: GuestAddress,
         vcpu_config: &VcpuConfig,
     ) -> Result<(), KvmVcpuConfigureError> {

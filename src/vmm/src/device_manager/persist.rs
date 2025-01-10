@@ -45,7 +45,7 @@ use crate::mmds::data_store::MmdsVersion;
 use crate::resources::{ResourcesError, VmResources};
 use crate::snapshot::Persist;
 use crate::vmm_config::mmds::MmdsConfigError;
-use crate::vstate::memory::GuestMemoryMmap;
+use crate::vstate::memory::{GuestMemoryMmap, Memory};
 use crate::EventManager;
 
 /// Errors for (de)serialization of the MMIO device manager.
@@ -234,7 +234,7 @@ pub struct ACPIDeviceManagerState {
 }
 
 pub struct ACPIDeviceManagerConstructorArgs<'a> {
-    pub mem: &'a GuestMemoryMmap,
+    pub mem: &'a Memory,
     pub resource_allocator: &'a mut ResourceAllocator,
     pub vm: &'a VmFd,
 }
