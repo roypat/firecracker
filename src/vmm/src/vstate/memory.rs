@@ -370,12 +370,27 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     true => Some(AtomicBitmap::with_len(region_size)),
                     false => None,
                 };
-                let region = MmapRegionBuilder::new_with_bitmap(region_size, bitmap)
-                    .with_mmap_prot(prot)
-                    .with_mmap_flags(flags)
-                    .with_file_offset(file_offset)
-                    .build()
-                    .map_err(MemoryError::MmapRegionError)?;
+                let region = unsafe {
+                    MmapRegionBuilder::new_with_bitmap(region_size, bitmap)
+                        .with_raw_mmap_pointer({
+                            let ret = libc::mmap(
+                                std::ptr::null_mut(),
+                                region_size,
+                                prot,
+                                flags,
+                                file_offset.file().as_raw_fd(),
+                                file_offset.start() as _,
+                            );
+                            if ret == libc::MAP_FAILED {
+                                return Err(MemoryError::MmapRegionError(MmapRegionError::Mmap(
+                                    std::io::Error::last_os_error(),
+                                )));
+                            }
+                            ret.cast()
+                        })
+                        .build()
+                        .map_err(MemoryError::MmapRegionError)?
+                };
 
                 GuestRegionMmap::new(region, guest_address).map_err(MemoryError::VmMemoryError)
             })
