@@ -123,6 +123,7 @@ mod tests {
                 cpu_template: None,
                 track_dirty_pages: Some(false),
                 huge_pages: Some(expected),
+                secret_free: Some(false),
             };
             assert_eq!(
                 vmm_action_from_request(parse_put_machine_config(&Body::new(body)).unwrap()),
@@ -142,6 +143,7 @@ mod tests {
             cpu_template: Some(StaticCpuTemplate::None),
             track_dirty_pages: Some(false),
             huge_pages: Some(HugePageConfig::None),
+            secret_free: Some(false),
         };
         assert_eq!(
             vmm_action_from_request(parse_put_machine_config(&Body::new(body)).unwrap()),
@@ -161,6 +163,7 @@ mod tests {
             cpu_template: None,
             track_dirty_pages: Some(true),
             huge_pages: Some(HugePageConfig::None),
+            secret_free: Some(false),
         };
         assert_eq!(
             vmm_action_from_request(parse_put_machine_config(&Body::new(body)).unwrap()),
@@ -184,6 +187,7 @@ mod tests {
                 cpu_template: Some(StaticCpuTemplate::T2),
                 track_dirty_pages: Some(true),
                 huge_pages: Some(HugePageConfig::None),
+                secret_free: Some(false),
             };
             assert_eq!(
                 vmm_action_from_request(parse_put_machine_config(&Body::new(body)).unwrap()),
@@ -209,6 +213,7 @@ mod tests {
             cpu_template: None,
             track_dirty_pages: Some(true),
             huge_pages: Some(HugePageConfig::None),
+            secret_free: Some(false),
         };
         assert_eq!(
             vmm_action_from_request(parse_put_machine_config(&Body::new(body)).unwrap()),
