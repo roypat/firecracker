@@ -7,6 +7,7 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
+use std::os::fd::{AsRawFd, RawFd};
 
 use serde::{Deserialize, Serialize};
 pub use vm_memory::bitmap::{AtomicBitmap, Bitmap, BitmapSlice, BS};
@@ -53,6 +54,21 @@ pub enum MemoryError {
     MemfdSetLen(std::io::Error),
     /// Cannot restore hugetlbfs backed snapshot by mapping the memory file. Please use uffd.
     HugetlbfsSnapshot,
+}
+
+/// Struct encapsulating a guest_memfd instance
+#[derive(Debug)]
+pub struct GuestMemfd {
+    /// The actual guest_memfd file descriptor
+    pub fd: File,
+    /// The size of the guest_memfd
+    pub size: usize,
+}
+
+impl AsRawFd for GuestMemfd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
+    }
 }
 
 /// Struct encapsulating everything needed for managing Firecracker guest memory
@@ -129,9 +145,14 @@ pub struct GuestMemoryState {
 }
 
 impl Memory {
+    /// Returns the size of guest memory, in bytes.
+    pub fn size(&self) -> u64 {
+        self.shared.iter().map(|region| region.len()).sum()
+    }
+
     /// Returns the size of guest memory, in MiB.
     pub fn size_mib(&self) -> u64 {
-        self.shared.iter().map(|region| region.len()).sum::<u64>() >> 20
+        self.size() >> 20
     }
 
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.

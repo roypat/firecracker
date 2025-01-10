@@ -7,6 +7,8 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
+use std::fs::File;
+use std::os::fd::FromRawFd;
 
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
@@ -14,7 +16,9 @@ use kvm_bindings::{
     KVM_CLOCK_TSC_STABLE, KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE,
     KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY,
 };
-use kvm_bindings::{kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES};
+use kvm_bindings::{
+    kvm_create_guest_memfd, kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES,
+};
 use kvm_ioctls::{Kvm, VmFd};
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +29,7 @@ use crate::arch::aarch64::gic::GicState;
 use crate::cpu_config::templates::KvmCapability;
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
-use crate::vstate::memory::{Address, GuestMemory, GuestMemoryRegion, Memory};
+use crate::vstate::memory::{Address, GuestMemfd, GuestMemory, GuestMemoryRegion, Memory};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -69,6 +73,8 @@ pub enum VmError {
     #[cfg(target_arch = "x86_64")]
     /// Failed to set KVM vm irqchip: {0}
     VmSetIrqChip(kvm_ioctls::Error),
+    /// Failed to create guest_memfd: {0}
+    VmCreateGuestMemfd(kvm_ioctls::Error),
     /// Cannot configure the microvm: {0}
     VmSetup(kvm_ioctls::Error),
     #[cfg(target_arch = "aarch64")]
@@ -218,6 +224,28 @@ impl Vm {
             .map_err(VmError::VmSetup)?;
 
         Ok(())
+    }
+
+    /// Creates a new guest_memfd tied to this [`Vm`] instance
+    pub fn create_guest_memfd(&self, size: usize) -> Result<GuestMemfd, VmError> {
+        // To enable funky things like direct map removal, set the `flags` argument in this
+        // structure
+        let create_gmem = kvm_create_guest_memfd {
+            size: size as u64,
+            ..Default::default()
+        };
+
+        let guest_memfd = self
+            .fd
+            .create_guest_memfd(create_gmem)
+            .map_err(VmError::VmCreateGuestMemfd)?;
+        // SAFETY: create_guest_memfd only returns Ok(...) if it managed to produce a valid FD.
+        let gmem_file = unsafe { File::from_raw_fd(guest_memfd) };
+
+        Ok(GuestMemfd {
+            fd: gmem_file,
+            size,
+        })
     }
 
     pub(crate) fn set_kvm_memory_regions(
