@@ -122,6 +122,7 @@ use device_manager::acpi::ACPIDeviceManager;
 use device_manager::resources::ResourceAllocator;
 use devices::acpi::vmgenid::VmGenIdError;
 use event_manager::{EventManager as BaseEventManager, EventOps, Events, MutEventSubscriber};
+use kvm_bindings::{kvm_memory_attributes, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use seccompiler::BpfProgram;
 use userfaultfd::Uffd;
 use vmm_sys_util::epoll::EventSet;
@@ -628,6 +629,31 @@ impl Vmm {
         self.vm
             .set_kvm_memory_regions(&self.guest_memory, enable)
             .map_err(VmmError::Vm)
+    }
+
+    pub fn set_guest_memory_private(&mut self) {
+        let bitmap = self
+            .guest_memory
+            .attributes_bitmap()
+            .expect("I desire the guest_memfd, father");
+
+        self.guest_memory.iter().for_each(|region| {
+            let address = region.start_addr().0;
+            let size = region.size();
+            let attrs = kvm_memory_attributes {
+                address,
+                size: size as u64,
+                attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                ..Default::default()
+            };
+
+            self.vm
+                .fd()
+                .set_memory_attributes(attrs)
+                .expect("setting memory attributes failed");
+
+            bitmap.set_addr_range(address as _, size);
+        });
     }
 
     /// Updates the path of the host file backing the emulated block device with id `drive_id`.

@@ -8,7 +8,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 use std::fs::File;
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
@@ -17,7 +17,8 @@ use kvm_bindings::{
     KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_bindings::{
-    kvm_create_guest_memfd, kvm_userspace_memory_region, KVM_API_VERSION, KVM_MEM_LOG_DIRTY_PAGES,
+    kvm_create_guest_memfd, kvm_userspace_memory_region2, KVM_API_VERSION, KVM_MEM_GUEST_MEMFD,
+    KVM_MEM_LOG_DIRTY_PAGES,
 };
 use kvm_ioctls::{Kvm, VmFd};
 use serde::{Deserialize, Serialize};
@@ -254,24 +255,46 @@ impl Vm {
         track_dirty_pages: bool,
     ) -> Result<(), VmError> {
         let mut flags = 0u32;
+        let has_gmem = guest_mem.guest_memfd().is_some();
+
+        // KVM doesn't support dirty page tracking for gmem enabled memslots
+        assert!(!(track_dirty_pages && has_gmem));
+
         if track_dirty_pages {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
+        if has_gmem {
+            flags |= KVM_MEM_GUEST_MEMFD;
+        }
+
+        let mut guest_memfd_offset = 0;
+
         guest_mem
             .iter()
             .zip(0u32..)
             .try_for_each(|(region, slot)| {
-                let memory_region = kvm_userspace_memory_region {
+                let memory_region = kvm_userspace_memory_region2 {
                     slot,
                     guest_phys_addr: region.start_addr().raw_value(),
                     memory_size: region.len(),
                     // It's safe to unwrap because the guest address is valid.
                     userspace_addr: guest_mem.get_host_address(region.start_addr()).unwrap() as u64,
+                    guest_memfd_offset,
+                    guest_memfd: guest_mem
+                        .guest_memfd()
+                        .map(|gmem| gmem.as_raw_fd() as _)
+                        .unwrap_or(0),
                     flags,
+
+                    ..Default::default()
                 };
 
+                if has_gmem {
+                    guest_memfd_offset += region.len();
+                }
+
                 // SAFETY: Safe because the fd is a valid KVM file descriptor.
-                unsafe { self.fd.set_user_memory_region(memory_region) }
+                unsafe { self.fd.set_user_memory_region2(memory_region) }
             })
             .map_err(VmError::SetUserMemoryRegion)?;
         Ok(())

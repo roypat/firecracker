@@ -76,6 +76,11 @@ impl AsRawFd for GuestMemfd {
 pub struct Memory {
     /// The shared part of guest memory (either anonymous memory or a mmap'd memfd)
     pub shared: GuestMemoryMmap,
+
+    guest_memfd: Option<GuestMemfd>,
+    /// Keeps track of the KVM memory attributes. A bit set to 1 indicates that the repsective page
+    /// is set to private.
+    mem_attributes: Option<AtomicBitmap>,
 }
 
 impl GuestMemory for Memory {
@@ -91,6 +96,38 @@ impl GuestMemory for Memory {
 
     fn iter(&self) -> impl Iterator<Item = &Self::R> {
         self.shared.iter()
+    }
+
+    fn try_access<F>(
+        &self,
+        count: usize,
+        addr: GuestAddress,
+        mut f: F,
+    ) -> vm_memory::guest_memory::Result<usize>
+    where
+        F: FnMut(
+            usize,
+            usize,
+            MemoryRegionAddress,
+            &Self::R,
+        ) -> vm_memory::guest_memory::Result<usize>,
+    {
+        self.shared
+            .try_access(count, addr, |offset, len, caddr, region| {
+                // Disallow accesses to private memory ranges
+                if let Some(ref attrs) = self.mem_attributes {
+                    let first_bit = (addr.0 as usize + offset) / 4096;
+                    let last_bit = (addr.0 as usize + offset + len) / 4096;
+
+                    for bit in first_bit..=last_bit {
+                        if attrs.is_bit_set(bit) {
+                            return Err(vm_memory::guest_memory::Error::HostAddressNotAvailable);
+                        }
+                    }
+                }
+
+                f(offset, len, caddr, region)
+            })
     }
 }
 
@@ -155,6 +192,25 @@ impl Memory {
         self.size() >> 20
     }
 
+    /// Associates the given guest memfd with this [`Memory`]. Size of the guest_memfd must
+    /// match size of shared memory exactly.
+    pub fn set_guest_memfd(&mut self, gmem: GuestMemfd) {
+        assert_eq!(gmem.size, self.size() as usize);
+
+        // Bit wasteful because we dont use low physical addresses, but let's deal with that later
+        self.mem_attributes = Some(AtomicBitmap::with_len(self.last_addr().0 as usize));
+        self.guest_memfd = Some(gmem);
+    }
+
+    /// Retrives a references to the [`GuestMemfd`] associated with this [`Memory`]
+    pub fn guest_memfd(&self) -> Option<&GuestMemfd> {
+        self.guest_memfd.as_ref()
+    }
+
+    pub fn attributes_bitmap(&self) -> Option<&AtomicBitmap> {
+        self.mem_attributes.as_ref()
+    }
+
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
     pub fn memfd_backed(
         mem_size_mib: usize,
@@ -174,8 +230,13 @@ impl Memory {
             })
             .collect::<Result<Vec<_>, MemoryError>>()?;
 
-        GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, true)
-            .map(|shared| Memory { shared })
+        GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, true).map(|shared| {
+            Memory {
+                shared,
+                guest_memfd: None,
+                mem_attributes: None,
+            }
+        })
     }
 
     /// Creates a GuestMemoryMmap from raw regions backed by anonymous memory.
@@ -212,7 +273,11 @@ impl Memory {
 
         GuestMemoryMmap::from_regions(regions)
             .map_err(MemoryError::VmMemoryError)
-            .map(|shared| Memory { shared })
+            .map(|shared| Memory {
+                shared,
+                guest_memfd: None,
+                mem_attributes: None,
+            })
     }
 
     /// Creates a GuestMemoryMmap backed by a `file` if present, otherwise backed
@@ -241,8 +306,13 @@ impl Memory {
                     .collect::<Result<Vec<_>, std::io::Error>>()
                     .map_err(MemoryError::FileError)?;
 
-                GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, false)
-                    .map(|shared| Memory { shared })
+                GuestMemoryMmap::from_raw_regions_file(regions, track_dirty_pages, false).map(
+                    |shared| Memory {
+                        shared,
+                        guest_memfd: None,
+                        mem_attributes: None,
+                    },
+                )
             }
             None => {
                 let regions = state
