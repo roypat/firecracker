@@ -81,6 +81,9 @@ pub struct Memory {
     /// Keeps track of the KVM memory attributes. A bit set to 1 indicates that the repsective page
     /// is set to private.
     mem_attributes: Option<AtomicBitmap>,
+
+    /// VMA mapping guest_memfd
+    private: Option<GuestMemoryMmap>,
 }
 
 impl GuestMemory for Memory {
@@ -114,19 +117,46 @@ impl GuestMemory for Memory {
     {
         self.shared
             .try_access(count, addr, |offset, len, caddr, region| {
-                // Disallow accesses to private memory ranges
+                if len == 0 {
+                    return f(offset, len, caddr, region);
+                }
+
                 if let Some(ref attrs) = self.mem_attributes {
                     let first_bit = (addr.0 as usize + offset) / 4096;
                     let last_bit = (addr.0 as usize + offset + len) / 4096;
 
-                    for bit in first_bit..=last_bit {
-                        if attrs.is_bit_set(bit) {
-                            return Err(vm_memory::guest_memory::Error::HostAddressNotAvailable);
-                        }
-                    }
-                }
+                    let range_private = attrs.is_bit_set(first_bit);
 
-                f(offset, len, caddr, region)
+                    // next_range_start will the bit representing the first page that has another
+                    // visibility as first_bit, or the bit representing the page
+                    // _past_ the page represented by last_bit (hence the +1 in the unwrap_or).
+                    let next_range_start = (first_bit + 1..=last_bit)
+                        .find(|&bit| attrs.is_bit_set(bit) != range_private)
+                        .unwrap_or(last_bit + 1);
+
+                    // As such, the range of pages we can write is represented by [first_bit,
+                    // next_range_start)
+                    let len = len.min((next_range_start - first_bit) * 4096);
+
+                    let region = if range_private {
+                        self.private
+                            .as_ref()
+                            .unwrap()
+                            .find_region(addr.unchecked_add(offset as u64))
+                            .unwrap()
+                    } else {
+                        region
+                    };
+
+                    // If this ends up writing less than requested, `GuestMemory::try_access` will
+                    // notice this, and re-call us with offset/caddr advanced past the already
+                    // written section. So if we want to write a range that's
+                    // covering both shared and private parts, we will write
+                    // part by part.
+                    f(offset, len, caddr, region)
+                } else {
+                    f(offset, len, caddr, region)
+                }
             })
     }
 }
@@ -194,12 +224,31 @@ impl Memory {
 
     /// Associates the given guest memfd with this [`Memory`]. Size of the guest_memfd must
     /// match size of shared memory exactly.
-    pub fn set_guest_memfd(&mut self, gmem: GuestMemfd) {
+    pub fn set_guest_memfd(&mut self, gmem: GuestMemfd) -> Result<(), MemoryError> {
         assert_eq!(gmem.size, self.size() as usize);
 
+        let mut gmem_offset = 0;
+        let regions = self
+            .iter()
+            .map(|region| {
+                let file_offset = FileOffset::new(
+                    gmem.fd.try_clone().map_err(MemoryError::FileError)?,
+                    gmem_offset,
+                );
+                gmem_offset += region.len();
+
+                Ok((file_offset, region.start_addr(), region.len() as usize))
+            })
+            .collect::<Result<Vec<_>, MemoryError>>()?;
+
+        self.private = Some(GuestMemoryMmap::from_raw_regions_file(
+            regions, false, true,
+        )?);
         // Bit wasteful because we dont use low physical addresses, but let's deal with that later
         self.mem_attributes = Some(AtomicBitmap::with_len(self.last_addr().0 as usize));
         self.guest_memfd = Some(gmem);
+
+        Ok(())
     }
 
     /// Retrives a references to the [`GuestMemfd`] associated with this [`Memory`]
@@ -235,6 +284,7 @@ impl Memory {
                 shared,
                 guest_memfd: None,
                 mem_attributes: None,
+                private: None,
             }
         })
     }
@@ -275,6 +325,7 @@ impl Memory {
             .map_err(MemoryError::VmMemoryError)
             .map(|shared| Memory {
                 shared,
+                private: None,
                 guest_memfd: None,
                 mem_attributes: None,
             })
@@ -311,6 +362,7 @@ impl Memory {
                         shared,
                         guest_memfd: None,
                         mem_attributes: None,
+                        private: None,
                     },
                 )
             }
