@@ -161,9 +161,22 @@ fn create_vmm_and_vcpus(
 ) -> Result<(Vmm, Vec<Vcpu>), StartMicrovmError> {
     use self::StartMicrovmError::*;
 
+    let vm_type = if secret_free {
+        #[cfg(target_arch = "x86_64")]
+        {
+            kvm_bindings::KVM_X86_SW_PROTECTED_VM
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            crate::vstate::vm::KVM_VM_TYPE_ARM_SW_PROTECTED
+        }
+    } else {
+        0
+    };
+
     // Set up Kvm Vm and register memory regions.
     // Build custom CPU config if a custom template is provided.
-    let mut vm = Vm::new(kvm_capabilities)
+    let mut vm = Vm::new(vm_type, kvm_capabilities)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 

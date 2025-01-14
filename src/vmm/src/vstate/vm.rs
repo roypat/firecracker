@@ -136,10 +136,15 @@ pub struct Vm {
     irqchip_handle: Option<GICDevice>,
 }
 
+pub const KVM_VM_TYPE_ARM_SHIFT: u32 = 8;
+pub const KVM_VM_TYPE_ARM_MASK: u32 = 0xf << KVM_VM_TYPE_ARM_SHIFT;
+
+pub const KVM_VM_TYPE_ARM_SW_PROTECTED: u32 = 1 << KVM_VM_TYPE_ARM_SHIFT;
+
 /// Contains Vm functions that are usable across CPU architectures
 impl Vm {
     /// Constructs a new `Vm` using the given `Kvm` instance.
-    pub fn new(kvm_cap_modifiers: Vec<KvmCapability>) -> Result<Self, VmError> {
+    pub fn new(vm_type: u32, kvm_cap_modifiers: Vec<KvmCapability>) -> Result<Self, VmError> {
         let kvm = Kvm::new().map_err(VmError::Kvm)?;
 
         // Check that KVM has the correct version.
@@ -154,8 +159,22 @@ impl Vm {
         Self::check_capabilities(&kvm, &total_caps).map_err(VmError::Capabilities)?;
 
         let max_memslots = kvm.get_nr_memslots();
+
+        #[cfg(target_arch = "aarch64")]
+        let vm_type = {
+            let ipa_size = if kvm.check_extension(kvm_ioctls::Cap::ArmVmIPASize) {
+                kvm.get_host_ipa_limit() as u32
+            } else {
+                0
+            };
+
+            ipa_size & kvm_bindings::KVM_VM_TYPE_ARM_IPA_SIZE_MASK | vm_type & KVM_VM_TYPE_ARM_MASK
+        };
+
         // Create fd for interacting with kvm-vm specific functions.
-        let vm_fd = kvm.create_vm().map_err(VmError::VmFd)?;
+        let vm_fd = kvm
+            .create_vm_with_type(vm_type as u64)
+            .map_err(VmError::VmFd)?;
 
         #[cfg(target_arch = "aarch64")]
         {
