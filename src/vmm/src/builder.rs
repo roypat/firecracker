@@ -431,12 +431,6 @@ pub enum BuildMicrovmFromSnapshotError {
     KvmAccess(#[from] vmm_sys_util::errno::Error),
     /// Error configuring the TSC, frequency not present in the given snapshot.
     TscFrequencyNotPresent,
-    #[cfg(target_arch = "x86_64")]
-    /// Could not get TSC to check if TSC scaling was required with the snapshot: {0}
-    GetTsc(#[from] crate::vstate::vcpu::GetTscError),
-    #[cfg(target_arch = "x86_64")]
-    /// Could not set TSC scaling within the snapshot: {0}
-    SetTsc(#[from] crate::vstate::vcpu::SetTscError),
     /// Failed to restore microVM state: {0}
     RestoreState(#[from] crate::vstate::vm::RestoreStateError),
     /// Failed to update microVM configuration: {0}
@@ -487,36 +481,18 @@ pub fn build_microvm_from_snapshot(
         microvm_state.kvm_state.kvm_cap_modifiers.clone(),
     )?;
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        // Scale TSC to match, extract the TSC freq from the state if specified
-        if let Some(state_tsc) = microvm_state.vcpu_states[0].tsc_khz {
-            // Scale the TSC frequency for all VCPUs. If a TSC frequency is not specified in the
-            // snapshot, by default it uses the host frequency.
-            if vcpus[0].kvm_vcpu.is_tsc_scaling_required(state_tsc)? {
-                for vcpu in &vcpus {
-                    vcpu.kvm_vcpu.set_tsc_khz(state_tsc)?;
-                }
-            }
-        }
-    }
+    #[cfg(target_arch = "aarch64")]
+    let mpidrs = construct_kvm_mpidrs(&microvm_state.vcpu_states);
 
     // Restore vcpus kvm state.
-    for (vcpu, state) in vcpus.iter_mut().zip(microvm_state.vcpu_states.iter()) {
-        vcpu.kvm_vcpu
-            .restore_state(state)
-            .map_err(VcpuError::VcpuResponse)
-            .map_err(BuildMicrovmFromSnapshotError::RestoreVcpus)?;
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        let mpidrs = construct_kvm_mpidrs(&microvm_state.vcpu_states);
-        // Restore kvm vm state.
-        vmm.vm.restore_state(&mpidrs, &microvm_state.vm_state)?;
+    for (vcpu, state) in vcpus.iter_mut().zip(microvm_state.vcpu_states.into_iter()) {
+        vcpu.state = Some(state);
     }
 
     // Restore kvm vm state.
+    #[cfg(target_arch = "aarch64")]
+    vmm.vm.restore_state(&mpidrs, &microvm_state.vm_state)?;
+
     #[cfg(target_arch = "x86_64")]
     vmm.vm.restore_state(&microvm_state.vm_state)?;
 

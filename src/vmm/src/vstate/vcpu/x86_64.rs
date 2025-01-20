@@ -80,6 +80,8 @@ pub enum KvmVcpuError {
     VcpuGetCpuid(kvm_ioctls::Error),
     /// Failed to get KVM TSC frequency: {0}
     VcpuGetTsc(kvm_ioctls::Error),
+    /// Could not set TSC scaling within the snapshot: {0}
+    VcpuSetTsc(vmm_sys_util::errno::Error),
     /// Failed to set KVM vcpu cpuid: {0}
     VcpuSetCpuid(kvm_ioctls::Error),
     /// Failed to set KVM vcpu debug regs: {0}
@@ -103,16 +105,6 @@ pub enum KvmVcpuError {
     /// Failed to set KVM vcpu xsave: {0}
     VcpuSetXsave(kvm_ioctls::Error),
 }
-
-/// Error type for [`KvmVcpu::get_tsc_khz`] and [`KvmVcpu::is_tsc_scaling_required`].
-#[derive(Debug, thiserror::Error, derive_more::From, Eq, PartialEq)]
-#[error("{0}")]
-pub struct GetTscError(vmm_sys_util::errno::Error);
-
-/// Error type for [`KvmVcpu::set_tsc_khz`].
-#[derive(Debug, thiserror::Error, Eq, PartialEq)]
-#[error("{0}")]
-pub struct SetTscError(#[from] kvm_ioctls::Error);
 
 /// Error type for [`KvmVcpu::configure`].
 #[derive(Debug, thiserror::Error, displaydoc::Display, Eq, PartialEq)]
@@ -268,8 +260,8 @@ impl KvmVcpu {
     /// # Errors
     ///
     /// When [`kvm_ioctls::VcpuFd::get_tsc_khz`] errrors.
-    pub fn get_tsc_khz(&self) -> Result<u32, GetTscError> {
-        let res = self.fd.get_tsc_khz()?;
+    pub fn get_tsc_khz(&self) -> Result<u32, KvmVcpuError> {
+        let res = self.fd.get_tsc_khz().map_err(KvmVcpuError::VcpuGetTsc)?;
         Ok(res)
     }
 
@@ -549,7 +541,7 @@ impl KvmVcpu {
     /// # Errors
     ///
     /// When
-    pub fn is_tsc_scaling_required(&self, state_tsc_freq: u32) -> Result<bool, GetTscError> {
+    pub fn is_tsc_scaling_required(&self, state_tsc_freq: u32) -> Result<bool, KvmVcpuError> {
         // Compare the current TSC freq to the one found
         // in the state. If they are different, we need to
         // scale the TSC to the freq found in the state.
@@ -562,8 +554,10 @@ impl KvmVcpu {
     }
 
     /// Scale the TSC frequency of this vCPU to the one provided as a parameter.
-    pub fn set_tsc_khz(&self, tsc_freq: u32) -> Result<(), SetTscError> {
-        self.fd.set_tsc_khz(tsc_freq).map_err(SetTscError)
+    pub fn set_tsc_khz(&self, tsc_freq: u32) -> Result<(), KvmVcpuError> {
+        self.fd
+            .set_tsc_khz(tsc_freq)
+            .map_err(KvmVcpuError::VcpuSetTsc)
     }
 
     /// Use provided state to populate KVM internal state.
@@ -588,6 +582,12 @@ impl KvmVcpu {
         //
         // SET_LAPIC must come before SET_MSRS, because the TSC deadline MSR
         // only restores successfully, when the LAPIC is correctly configured.
+
+        if let Some(state_tsc) = state.tsc_khz {
+            if self.is_tsc_scaling_required(state_tsc)? {
+                self.set_tsc_khz(state_tsc)?;
+            }
+        }
 
         self.fd
             .set_cpuid2(&state.cpuid)

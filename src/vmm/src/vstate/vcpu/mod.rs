@@ -122,6 +122,9 @@ pub struct Vcpu {
     response_receiver: Option<Receiver<VcpuResponse>>,
     /// The transmitting end of the responses channel owned by the vcpu side.
     response_sender: Sender<VcpuResponse>,
+
+    /// The vcpu state to restore immediately before running
+    pub state: Option<VcpuState>,
 }
 
 impl Vcpu {
@@ -228,6 +231,7 @@ impl Vcpu {
             #[cfg(feature = "gdb")]
             gdb_event: None,
             kvm_vcpu,
+            state: None,
         })
     }
 
@@ -259,7 +263,7 @@ impl Vcpu {
     pub fn start_threaded(
         mut self,
         seccomp_filter: Arc<BpfProgram>,
-        barrier: Arc<Barrier>,
+        restore_barrier: Arc<Barrier>,
     ) -> Result<VcpuHandle, StartThreadedError> {
         let event_sender = self.event_sender.take().expect("vCPU already started");
         let response_receiver = self.response_receiver.take().unwrap();
@@ -269,9 +273,7 @@ impl Vcpu {
                 let filter = &*seccomp_filter;
                 self.init_thread_local_data()
                     .expect("Cannot cleanly initialize vcpu TLS.");
-                // Synchronization to make sure thread local data is initialized.
-                barrier.wait();
-                self.run(filter);
+                self.run(filter, restore_barrier);
             })?;
 
         Ok(VcpuHandle::new(
@@ -286,10 +288,16 @@ impl Vcpu {
     /// Runs the vCPU in KVM context in a loop. Handles KVM_EXITs then goes back in.
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&mut self, seccomp_filter: BpfProgramRef) {
+    pub fn run(&mut self, seccomp_filter: BpfProgramRef, restore_barrier: Arc<Barrier>) {
         // Load seccomp filters for this vCPU thread.
         // Execution panics if filters cannot be loaded, use --no-seccomp if skipping filters
         // altogether is the desired behaviour.
+        if let Some(state) = self.state.take() {
+            self.kvm_vcpu.restore_state(&state).unwrap();
+        }
+
+        restore_barrier.wait();
+
         if let Err(err) = crate::seccomp::apply_filter(seccomp_filter) {
             panic!(
                 "Failed to set the requested seccomp filters on vCPU {}: Error: {}",

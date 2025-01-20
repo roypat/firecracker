@@ -396,7 +396,7 @@ impl Vmm {
                 .push(vcpu.start_threaded(vcpu_seccomp_filter.clone(), barrier.clone())?);
         }
         self.instance_info.state = VmState::Paused;
-        // Wait for vCPUs to initialize their TLS before moving forward.
+        // Wait for vCPUs to initialize and also restore state
         barrier.wait();
 
         Ok(())
