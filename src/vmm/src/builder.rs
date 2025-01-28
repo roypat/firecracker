@@ -153,7 +153,7 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 fn create_vmm_and_vcpus(
     instance_info: &InstanceInfo,
     event_manager: &mut EventManager,
-    guest_memory: GuestMemoryMmap,
+    shared_memory: GuestMemoryMmap,
     uffd: Option<Uffd>,
     vcpu_count: u8,
     kvm_capabilities: Vec<KvmCapability>,
@@ -168,10 +168,10 @@ fn create_vmm_and_vcpus(
     let mut vm = Vm::new(&kvm)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
-    kvm.check_memory(&guest_memory)
+    kvm.check_memory(&shared_memory)
         .map_err(VmmError::Kvm)
         .map_err(StartMicrovmError::Internal)?;
-    vm.memory_init(&guest_memory)
+    vm.memory_init(&shared_memory)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
@@ -216,7 +216,7 @@ fn create_vmm_and_vcpus(
         shutdown_exit_code: None,
         kvm,
         vm,
-        guest_memory,
+        shared_memory,
         uffd,
         vcpus_handles: Vec::new(),
         vcpus_exit_evt,
@@ -252,12 +252,12 @@ pub fn build_microvm_for_boot(
         .as_ref()
         .ok_or(MissingKernelConfig)?;
 
-    let guest_memory = vm_resources
-        .allocate_guest_memory()
+    let shared_memory = vm_resources
+        .allocate_shared_guest_memory()
         .map_err(StartMicrovmError::GuestMemory)?;
 
-    let entry_addr = load_kernel(boot_config, &guest_memory)?;
-    let initrd = load_initrd_from_config(boot_config, &guest_memory)?;
+    let entry_addr = load_kernel(boot_config, &shared_memory)?;
+    let initrd = load_initrd_from_config(boot_config, &shared_memory)?;
     // Clone the command-line so that a failed boot doesn't pollute the original.
     #[allow(unused_mut)]
     let mut boot_cmdline = boot_config.cmdline.clone();
@@ -270,7 +270,7 @@ pub fn build_microvm_for_boot(
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
-        guest_memory,
+        shared_memory,
         None,
         vm_resources.machine_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
@@ -503,7 +503,7 @@ pub fn build_microvm_from_snapshot(
 
     // Restore devices states.
     let mmio_ctor_args = MMIODevManagerConstructorArgs {
-        mem: &vmm.guest_memory,
+        mem: &vmm.shared_memory,
         vm: vmm.vm.fd(),
         event_manager,
         resource_allocator: &mut vmm.resource_allocator,
@@ -519,7 +519,7 @@ pub fn build_microvm_from_snapshot(
 
     {
         let acpi_ctor_args = ACPIDeviceManagerConstructorArgs {
-            mem: &vmm.guest_memory,
+            mem: &vmm.shared_memory,
             resource_allocator: &mut vmm.resource_allocator,
             vm: vmm.vm.fd(),
         };
@@ -785,7 +785,7 @@ pub fn configure_system_for_boot(
         )
         .map_err(LoadCommandline)?;
         crate::arch::x86_64::configure_system(
-            &vmm.guest_memory,
+            &vmm.shared_memory,
             &mut vmm.resource_allocator,
             crate::vstate::memory::GuestAddress(crate::arch::x86_64::layout::CMDLINE_START),
             cmdline_size,
@@ -797,7 +797,7 @@ pub fn configure_system_for_boot(
         // Create ACPI tables and write them in guest memory
         // For the time being we only support ACPI in x86_64
         acpi::create_acpi_tables(
-            &vmm.guest_memory,
+            &vmm.shared_memory,
             &mut vmm.resource_allocator,
             &vmm.mmio_device_manager,
             &vmm.acpi_device_manager,
@@ -825,7 +825,7 @@ pub fn configure_system_for_boot(
             .collect();
         let cmdline = boot_cmdline.as_cstring()?;
         crate::arch::aarch64::configure_system(
-            &vmm.guest_memory,
+            &vmm.shared_memory,
             cmdline,
             vcpu_mpidr,
             vmm.mmio_device_manager.get_device_info(),
@@ -881,7 +881,7 @@ pub(crate) fn attach_boot_timer_device(
 }
 
 fn attach_vmgenid_device(vmm: &mut Vmm) -> Result<(), StartMicrovmError> {
-    let vmgenid = VmGenId::new(&vmm.guest_memory, &mut vmm.resource_allocator)
+    let vmgenid = VmGenId::new(&vmm.shared_memory, &mut vmm.resource_allocator)
         .map_err(StartMicrovmError::CreateVMGenID)?;
 
     vmm.acpi_device_manager
@@ -1107,7 +1107,7 @@ pub(crate) mod tests {
             shutdown_exit_code: None,
             kvm,
             vm,
-            guest_memory,
+            shared_memory: guest_memory,
             uffd: None,
             vcpus_handles: Vec::new(),
             vcpus_exit_evt,

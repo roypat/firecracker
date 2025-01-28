@@ -448,7 +448,7 @@ impl VmResources {
     ///
     /// If vhost-user-blk devices are in use, allocates memfd-backed shared memory, otherwise
     /// prefers anonymous memory for performance reasons.
-    pub fn allocate_guest_memory(&self) -> Result<GuestMemoryMmap, MemoryError> {
+    pub fn allocate_shared_guest_memory(&self) -> Result<GuestMemoryMmap, MemoryError> {
         let vhost_user_device_used = self
             .block
             .devices

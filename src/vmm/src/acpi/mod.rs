@@ -215,7 +215,7 @@ mod tests {
         // A mocke Vmm object with 128MBs of memory
         let mut vmm = default_vmm();
         let mut writer = AcpiTableWriter {
-            mem: &vmm.guest_memory,
+            mem: &vmm.shared_memory,
             resource_allocator: &mut vmm.resource_allocator,
         };
 
@@ -264,13 +264,13 @@ mod tests {
     #[test]
     fn test_write_acpi_table_small_memory() {
         let mut vmm = default_vmm();
-        vmm.guest_memory = arch_mem(
+        vmm.shared_memory = arch_mem(
             (SYSTEM_MEM_START + SYSTEM_MEM_SIZE - 4096)
                 .try_into()
                 .unwrap(),
         );
         let mut writer = AcpiTableWriter {
-            mem: &vmm.guest_memory,
+            mem: &vmm.shared_memory,
             resource_allocator: &mut vmm.resource_allocator,
         };
 

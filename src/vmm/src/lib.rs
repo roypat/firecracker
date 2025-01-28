@@ -312,8 +312,8 @@ pub struct Vmm {
     // Guest VM core resources.
     kvm: Kvm,
     vm: Vm,
-    guest_memory: GuestMemoryMmap,
     // Save UFFD in order to keep it open in the Firecracker process, as well.
+    shared_memory: GuestMemoryMmap,// Save UFFD in order to keep it open in the Firecracker process, as well.
     uffd: Option<Uffd>,
     vcpus_handles: Vec<VcpuHandle>,
     // Used by Vcpus and devices to initiate teardown; Vmm should never write here.
@@ -448,7 +448,7 @@ impl Vmm {
 
     /// Returns a reference to the inner `GuestMemoryMmap` object.
     pub fn guest_memory(&self) -> &GuestMemoryMmap {
-        &self.guest_memory
+        &self.shared_memory
     }
 
     /// Sets RDA bit in serial console
@@ -600,7 +600,7 @@ impl Vmm {
 
     /// Retrieves the KVM dirty bitmap for each of the guest's memory regions.
     pub fn reset_dirty_bitmap(&self) {
-        self.guest_memory
+        self.shared_memory
             .iter()
             .enumerate()
             .for_each(|(slot, region)| {
@@ -614,7 +614,7 @@ impl Vmm {
     /// Retrieves the KVM dirty bitmap for each of the guest's memory regions.
     pub fn get_dirty_bitmap(&self) -> Result<DirtyBitmap, VmmError> {
         let mut bitmap: DirtyBitmap = HashMap::new();
-        self.guest_memory
+        self.shared_memory
             .iter()
             .enumerate()
             .try_for_each(|(slot, region)| {
