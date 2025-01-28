@@ -40,7 +40,7 @@ fn test_build_and_boot_microvm() {
         let empty_seccomp_filters = get_empty_filters();
 
         let vmm_ret = build_and_boot_microvm(
-            &InstanceInfo::default(),
+            InstanceInfo::default(),
             &resources,
             &mut event_manager,
             &empty_seccomp_filters,

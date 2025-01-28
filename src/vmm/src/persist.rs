@@ -412,7 +412,7 @@ pub enum RestoreFromSnapshotGuestMemoryError {
 
 /// Loads a Microvm snapshot producing a 'paused' Microvm.
 pub fn restore_from_snapshot(
-    instance_info: &InstanceInfo,
+    instance_info: InstanceInfo,
     event_manager: &mut EventManager,
     seccomp_filters: &BpfThreadMap,
     params: &LoadSnapshotParams,

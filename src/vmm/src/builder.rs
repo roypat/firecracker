@@ -151,7 +151,7 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 
 #[cfg_attr(target_arch = "aarch64", allow(unused))]
 fn create_vmm_and_vcpus(
-    instance_info: &InstanceInfo,
+    instance_info: InstanceInfo,
     event_manager: &mut EventManager,
     shared_memory: GuestMemoryMmap,
     uffd: Option<Uffd>,
@@ -212,7 +212,7 @@ fn create_vmm_and_vcpus(
 
     let vmm = Vmm {
         events_observer: Some(std::io::stdin()),
-        instance_info: instance_info.clone(),
+        instance_info,
         shutdown_exit_code: None,
         kvm,
         vm,
@@ -236,7 +236,7 @@ fn create_vmm_and_vcpus(
 /// To boot the microVM and run those vCPUs, `Vmm::resume_vm()` needs to be
 /// called.
 pub fn build_microvm_for_boot(
-    instance_info: &InstanceInfo,
+    instance_info: InstanceInfo,
     vm_resources: &super::resources::VmResources,
     event_manager: &mut EventManager,
     seccomp_filters: &BpfThreadMap,
@@ -383,7 +383,7 @@ pub fn build_microvm_for_boot(
 /// An `Arc` reference of the built `Vmm` is also plugged in the `EventManager`, while another
 /// is returned.
 pub fn build_and_boot_microvm(
-    instance_info: &InstanceInfo,
+    instance_info: InstanceInfo,
     vm_resources: &super::resources::VmResources,
     event_manager: &mut EventManager,
     seccomp_filters: &BpfThreadMap,
@@ -446,7 +446,7 @@ pub enum BuildMicrovmFromSnapshotError {
 /// is returned.
 #[allow(clippy::too_many_arguments)]
 pub fn build_microvm_from_snapshot(
-    instance_info: &InstanceInfo,
+    instance_info: InstanceInfo,
     event_manager: &mut EventManager,
     microvm_state: MicrovmState,
     guest_memory: GuestMemoryMmap,
@@ -508,7 +508,7 @@ pub fn build_microvm_from_snapshot(
         event_manager,
         resource_allocator: &mut vmm.resource_allocator,
         vm_resources,
-        instance_id: &instance_info.id,
+        instance_id: &vmm.instance_info.id,
         restored_from_file: vmm.uffd.is_none(),
     };
 

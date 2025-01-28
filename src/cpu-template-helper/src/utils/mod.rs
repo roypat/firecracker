@@ -137,7 +137,7 @@ pub fn build_microvm_from_config(
 
     // Build a microVM.
     let vmm = build_microvm_for_boot(
-        &instance_info,
+        instance_info,
         &vm_resources,
         &mut event_manager,
         &seccomp_filters,

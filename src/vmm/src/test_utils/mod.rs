@@ -70,7 +70,7 @@ pub fn create_vmm(
     };
 
     let vmm = build_microvm_for_boot(
-        &InstanceInfo::default(),
+        InstanceInfo::default(),
         &resources,
         &mut event_manager,
         &empty_seccomp_filters,

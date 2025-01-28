@@ -568,7 +568,7 @@ fn build_microvm_from_json(
             .map_err(BuildFromJsonError::ParseFromJson)?;
     vm_resources.boot_timer = boot_timer_enabled;
     let vmm = vmm::builder::build_and_boot_microvm(
-        &instance_info,
+        instance_info,
         &vm_resources,
         event_manager,
         seccomp_filters,

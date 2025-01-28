@@ -539,7 +539,7 @@ impl<'a> PrebootApiController<'a> {
     // will be replaced by a runtime controller.
     fn start_microvm(&mut self) -> Result<VmmData, VmmActionError> {
         build_and_boot_microvm(
-            &self.instance_info,
+            self.instance_info.clone(),
             self.vm_resources,
             self.event_manager,
             self.seccomp_filters,
@@ -569,7 +569,7 @@ impl<'a> PrebootApiController<'a> {
 
         // Restore VM from snapshot
         let vmm = restore_from_snapshot(
-            &self.instance_info,
+            self.instance_info.clone(),
             self.event_manager,
             self.seccomp_filters,
             load_params,
