@@ -34,7 +34,6 @@ use crate::arch::InitrdConfig;
 use crate::construct_kvm_mpidrs;
 use crate::cpu_config::templates::{
     CpuConfiguration, CustomCpuTemplate, GetCpuTemplate, GetCpuTemplateError, GuestConfigError,
-    KvmCapability,
 };
 use crate::device_manager::acpi::ACPIDeviceManager;
 #[cfg(target_arch = "x86_64")]
@@ -156,18 +155,11 @@ fn create_vmm_and_vcpus(
     shared_memory: GuestMemoryMmap,
     uffd: Option<Uffd>,
     vcpu_count: u8,
-    kvm_capabilities: Vec<KvmCapability>,
+    kvm: Kvm,
+    mut vm: Vm,
 ) -> Result<(Vmm, Vec<Vcpu>), StartMicrovmError> {
     use self::StartMicrovmError::*;
 
-    let kvm = Kvm::new(kvm_capabilities)
-        .map_err(VmmError::Kvm)
-        .map_err(StartMicrovmError::Internal)?;
-    // Set up Kvm Vm and register memory regions.
-    // Build custom CPU config if a custom template is provided.
-    let mut vm = Vm::new(&kvm)
-        .map_err(VmmError::Vm)
-        .map_err(StartMicrovmError::Internal)?;
     kvm.check_memory_region_count(shared_memory.num_regions())
         .map_err(VmmError::Kvm)
         .map_err(StartMicrovmError::Internal)?;
@@ -267,13 +259,23 @@ pub fn build_microvm_for_boot(
         .cpu_template
         .get_cpu_template()?;
 
+    let kvm = Kvm::new(cpu_template.kvm_capabilities.clone())
+        .map_err(VmmError::Kvm)
+        .map_err(StartMicrovmError::Internal)?;
+    // Set up Kvm Vm and register memory regions.
+    // Build custom CPU config if a custom template is provided.
+    let vm = Vm::new(&kvm)
+        .map_err(VmmError::Vm)
+        .map_err(StartMicrovmError::Internal)?;
+
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
         shared_memory,
         None,
         vm_resources.machine_config.vcpu_count,
-        cpu_template.kvm_capabilities.clone(),
+        kvm,
+        vm,
     )?;
 
     #[cfg(feature = "gdb")]
@@ -456,13 +458,23 @@ pub fn build_microvm_from_snapshot(
 ) -> Result<Arc<Mutex<Vmm>>, BuildMicrovmFromSnapshotError> {
     // Build Vmm.
     debug!("event_start: build microvm from snapshot");
+
+    let kvm = Kvm::new(microvm_state.kvm_state.kvm_cap_modifiers.clone())
+        .map_err(VmmError::Kvm)
+        .map_err(StartMicrovmError::Internal)?;
+    // Set up Kvm Vm and register memory regions.
+    // Build custom CPU config if a custom template is provided.
+    let vm = Vm::new(&kvm)
+        .map_err(VmmError::Vm)
+        .map_err(StartMicrovmError::Internal)?;
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
         guest_memory,
         uffd,
         vm_resources.machine_config.vcpu_count,
-        microvm_state.kvm_state.kvm_cap_modifiers.clone(),
+        kvm,
+        vm,
     )?;
 
     #[cfg(target_arch = "x86_64")]
