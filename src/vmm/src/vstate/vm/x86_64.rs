@@ -1,12 +1,13 @@
 use std::fmt;
 
 use kvm_bindings::{
-    kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, KVM_CLOCK_TSC_STABLE,
+    kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, MsrList, KVM_CLOCK_TSC_STABLE,
     KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE, KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 
+use crate::arch::x86_64::msr::MsrError;
 use crate::vstate::kvm::Kvm;
 
 /// Error type for [`Vm::restore_state`]
@@ -36,6 +37,8 @@ pub enum ArchVmError {
     VmSetClock(kvm_ioctls::Error),
     /// Failed to set KVM vm irqchip: {0}
     VmSetIrqChip(kvm_ioctls::Error),
+    /// Failed to get MSR index list to save into snapshots: {0}
+    GetMsrsToSave(MsrError),
 }
 
 /// Structure representing the current architecture's understand of what a "virtual machine" is.
@@ -43,11 +46,16 @@ pub enum ArchVmError {
 pub struct ArchVm {
     /// KVM handle to this VM
     pub fd: VmFd,
+
+    /// List of MSRs to save when creating snapshots
+    pub msrs_to_save: MsrList,
 }
 
 impl ArchVm {
-    pub(super) fn arch_create(_: &Kvm, fd: VmFd) -> Result<ArchVm, ArchVmError> {
-        Ok(Self { fd })
+    pub(super) fn arch_create(kvm: &Kvm, fd: VmFd) -> Result<ArchVm, ArchVmError> {
+        let msrs_to_save = kvm.msrs_to_save().map_err(ArchVmError::GetMsrsToSave)?;
+
+        Ok(Self { fd, msrs_to_save })
     }
 
     /// Restores the KVM VM state.

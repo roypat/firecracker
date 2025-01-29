@@ -47,10 +47,7 @@ impl Vm {
     }
 
     /// Initializes the guest memory.
-    pub fn memory_init(
-        &self,
-        guest_mem: &GuestMemoryMmap,
-    ) -> Result<(), VmError> {
+    pub fn memory_init(&self, guest_mem: &GuestMemoryMmap) -> Result<(), VmError> {
         self.set_kvm_memory_regions(guest_mem)?;
         #[cfg(target_arch = "x86_64")]
         self.fd
@@ -73,7 +70,6 @@ impl Vm {
                 } else {
                     0
                 };
-
 
                 let memory_region = kvm_userspace_memory_region {
                     slot,
