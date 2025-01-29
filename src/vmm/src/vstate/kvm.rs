@@ -8,7 +8,6 @@ use kvm_ioctls::Kvm as KvmFd;
 use serde::{Deserialize, Serialize};
 
 use crate::cpu_config::templates::KvmCapability;
-use crate::vstate::memory::{GuestMemory, GuestMemoryMmap};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -93,8 +92,8 @@ impl Kvm {
     }
 
     /// Check guest memory does not have more regions than kvm allows.
-    pub fn check_memory(&self, guest_mem: &GuestMemoryMmap) -> Result<(), KvmError> {
-        if guest_mem.num_regions() > self.max_memslots {
+    pub fn check_memory_region_count(&self, num_regions: usize) -> Result<(), KvmError> {
+        if num_regions > self.max_memslots {
             Err(KvmError::NotEnoughMemorySlots)
         } else {
             Ok(())

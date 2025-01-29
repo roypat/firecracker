@@ -168,7 +168,7 @@ fn create_vmm_and_vcpus(
     let mut vm = Vm::new(&kvm)
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
-    kvm.check_memory(&shared_memory)
+    kvm.check_memory_region_count(shared_memory.num_regions())
         .map_err(VmmError::Kvm)
         .map_err(StartMicrovmError::Internal)?;
     vm.memory_init(&shared_memory)
