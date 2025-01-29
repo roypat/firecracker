@@ -5,7 +5,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_LOG_DIRTY_PAGES};
+use std::fs::File;
+use std::os::fd::FromRawFd;
+
+use kvm_bindings::{kvm_create_guest_memfd, kvm_userspace_memory_region, KVM_MEM_LOG_DIRTY_PAGES};
 use kvm_ioctls::VmFd;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -43,6 +46,8 @@ pub enum VmError {
     EventFd(std::io::Error),
     /// Failed to create vcpu: {0}
     CreateVcpu(VcpuError),
+    /// Failed to create guest_memfd: {0}
+    CreateGuestMemfd(kvm_ioctls::Error),
 }
 
 /// Contains Vm functions that are usable across CPU architectures
@@ -72,6 +77,21 @@ impl Vm {
         self.arch_post_create_vcpus(vcpu_count)?;
 
         Ok((vcpus, exit_evt))
+    }
+
+    /// Create a guest_memfd of the specified size
+    pub fn create_guest_memfd(&self, size_mib: usize) -> Result<File, VmError> {
+        let guest_memfd = self
+            .fd
+            .create_guest_memfd(kvm_create_guest_memfd {
+                size: (size_mib as u64) << 20,
+                ..Default::default()
+            })
+            .map_err(VmError::CreateGuestMemfd)?;
+
+        // SAFETY: `create_guest_memfd` only returns `Ok(raw_fd)` if the ioctl was actually
+        // successful, so we know we have a valid fd here.
+        unsafe { Ok(File::from_raw_fd(guest_memfd)) }
     }
 
     /// Initializes the guest memory.
