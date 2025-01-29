@@ -1,7 +1,18 @@
+use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 
 use crate::arch::aarch64::gic::GicState;
-use crate::Vm;
+use crate::Kvm;
+
+/// Structure representing the current architecture's understand of what a "virtual machine" is.
+#[derive(Debug)]
+pub struct ArchVm {
+    /// KVM handle to this VM
+    pub fd: VmFd,
+
+    // On aarch64 we need to keep around the fd obtained by creating the VGIC device.
+    irqchip_handle: Option<crate::arch::aarch64::gic::GICDevice>,
+}
 
 /// Error type for [`Vm::restore_state`]
 #[derive(Debug, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
@@ -14,7 +25,14 @@ pub enum ArchVmError {
     RestoreGic(crate::arch::aarch64::gic::GicError),
 }
 
-impl Vm {
+impl ArchVm {
+    pub(super) fn arch_create(_: &Kvm, fd: VmFd) -> Result<ArchVm, ArchVmError> {
+        Ok(Self {
+            fd,
+            irqchip_handle: None,
+        })
+    }
+
     /// Creates the GIC (Global Interrupt Controller).
     pub fn setup_irqchip(&mut self, vcpu_count: u8) -> Result<(), ArchVmError> {
         self.irqchip_handle = Some(

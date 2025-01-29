@@ -8,8 +8,6 @@
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_LOG_DIRTY_PAGES};
 use kvm_ioctls::VmFd;
 
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::GICDevice;
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
 use crate::vstate::kvm::Kvm;
@@ -22,7 +20,7 @@ mod arch;
 #[path = "aarch64.rs"]
 mod arch;
 
-pub use arch::{ArchVmError, VmState};
+pub use arch::{ArchVm as Vm, ArchVmError, VmState};
 
 /// Errors associated with the wrappers over KVM ioctls.
 /// Needs `rustfmt::skip` to make multiline comments work
@@ -39,36 +37,13 @@ pub enum VmError {
     Arch(#[from] ArchVmError),
 }
 
-/// A wrapper around creating and using a VM.
-#[derive(Debug)]
-pub struct Vm {
-    fd: VmFd,
-
-    // Arm specific fields.
-    // On aarch64 we need to keep around the fd obtained by creating the VGIC device.
-    #[cfg(target_arch = "aarch64")]
-    irqchip_handle: Option<GICDevice>,
-}
-
 /// Contains Vm functions that are usable across CPU architectures
 impl Vm {
     /// Create a new `Vm` struct.
     pub fn new(kvm: &Kvm) -> Result<Self, VmError> {
-        // Create fd for interacting with kvm-vm specific functions.
-        let vm_fd = kvm.fd.create_vm().map_err(VmError::VmFd)?;
+        let fd = kvm.fd.create_vm().map_err(VmError::VmFd)?;
 
-        #[cfg(target_arch = "aarch64")]
-        {
-            Ok(Vm {
-                fd: vm_fd,
-                irqchip_handle: None,
-            })
-        }
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            Ok(Vm { fd: vm_fd })
-        }
+        Vm::arch_create(kvm, fd).map_err(VmError::Arch)
     }
 
     /// Initializes the guest memory.

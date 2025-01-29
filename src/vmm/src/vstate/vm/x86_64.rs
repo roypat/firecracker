@@ -4,9 +4,10 @@ use kvm_bindings::{
     kvm_clock_data, kvm_irqchip, kvm_pit_config, kvm_pit_state2, KVM_CLOCK_TSC_STABLE,
     KVM_IRQCHIP_IOAPIC, KVM_IRQCHIP_PIC_MASTER, KVM_IRQCHIP_PIC_SLAVE, KVM_PIT_SPEAKER_DUMMY,
 };
+use kvm_ioctls::VmFd;
 use serde::{Deserialize, Serialize};
 
-use crate::Vm;
+use crate::vstate::kvm::Kvm;
 
 /// Error type for [`Vm::restore_state`]
 #[allow(missing_docs)]
@@ -37,7 +38,18 @@ pub enum ArchVmError {
     VmSetIrqChip(kvm_ioctls::Error),
 }
 
-impl Vm {
+/// Structure representing the current architecture's understand of what a "virtual machine" is.
+#[derive(Debug)]
+pub struct ArchVm {
+    /// KVM handle to this VM
+    pub fd: VmFd,
+}
+
+impl ArchVm {
+    pub(super) fn arch_create(_: &Kvm, fd: VmFd) -> Result<ArchVm, ArchVmError> {
+        Ok(Self { fd })
+    }
+
     /// Restores the KVM VM state.
     ///
     /// # Errors
