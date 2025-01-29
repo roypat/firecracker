@@ -64,15 +64,18 @@ pub const MMIO_MEM_SIZE: u64 = MEM_32BIT_GAP_SIZE;
 /// These should be used to configure the GuestMemoryMmap structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.
-pub fn arch_memory_regions(size: usize) -> Vec<(GuestAddress, usize)> {
+pub fn arch_memory_regions(offset: usize, size: usize) -> Vec<(GuestAddress, usize)> {
     // It's safe to cast MMIO_MEM_START to usize because it fits in a u32 variable
     // (It points to an address in the 32 bit space).
-    match size.checked_sub(usize::try_from(MMIO_MEM_START).unwrap()) {
+    match (size + offset).checked_sub(u64_to_usize(MMIO_MEM_START)) {
         // case1: guest memory fits before the gap
-        None | Some(0) => vec![(GuestAddress(0), size)],
+        None | Some(0) => vec![(GuestAddress(offset as u64), size)],
         // case2: guest memory extends beyond the gap
         Some(remaining) => vec![
-            (GuestAddress(0), usize::try_from(MMIO_MEM_START).unwrap()),
+            (
+                GuestAddress(offset as u64),
+                u64_to_usize(MMIO_MEM_START) - offset,
+            ),
             (GuestAddress(FIRST_ADDR_PAST_32BITS), remaining),
         ],
     }
@@ -226,7 +229,7 @@ mod tests {
 
     #[test]
     fn regions_lt_4gb() {
-        let regions = arch_memory_regions(1usize << 29);
+        let regions = arch_memory_regions(0, 1usize << 29);
         assert_eq!(1, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(1usize << 29, regions[0].1);
@@ -234,7 +237,7 @@ mod tests {
 
     #[test]
     fn regions_gt_4gb() {
-        let regions = arch_memory_regions((1usize << 32) + 0x8000);
+        let regions = arch_memory_regions(0, (1usize << 32) + 0x8000);
         assert_eq!(2, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1u64 << 32), regions[1].0);
