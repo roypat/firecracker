@@ -6,16 +6,21 @@
 // found in the THIRD-PARTY file.
 
 use std::fs::File;
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 
-use kvm_bindings::{kvm_create_guest_memfd, kvm_userspace_memory_region, KVM_MEM_LOG_DIRTY_PAGES};
+use kvm_bindings::{
+    kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region2,
+    KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES,
+};
 use kvm_ioctls::VmFd;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "x86_64")]
 use crate::utils::u64_to_usize;
 use crate::vstate::kvm::Kvm;
-use crate::vstate::memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use crate::vstate::memory::{
+    Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
+};
 
 #[cfg(target_arch = "x86_64")]
 #[path = "x86_64.rs"]
@@ -48,6 +53,8 @@ pub enum VmError {
     CreateVcpu(VcpuError),
     /// Failed to create guest_memfd: {0}
     CreateGuestMemfd(kvm_ioctls::Error),
+    /// Failed to set memory attributes of guest_memfd-backed memory to private: {0}
+    SetMemoryAttributes(kvm_ioctls::Error),
 }
 
 /// Contains Vm functions that are usable across CPU architectures
@@ -95,8 +102,50 @@ impl Vm {
     }
 
     /// Initializes the guest memory.
-    pub fn memory_init(&self, guest_mem: &GuestMemoryMmap) -> Result<(), VmError> {
-        self.set_kvm_memory_regions(guest_mem)?;
+    pub fn memory_init(
+        &self,
+        shared_mem: &GuestMemoryMmap,
+        private_mem: Option<&GuestMemoryMmap>,
+    ) -> Result<(), VmError> {
+        shared_mem
+            .iter()
+            .map(kvmify)
+            .chain(
+                private_mem
+                    .iter()
+                    .flat_map(|private_mem| private_mem.iter())
+                    .map(|region| {
+                        let mut kvm_region = kvmify(region);
+                        let file_offset = region.file_offset().unwrap();
+
+                        kvm_region.flags |= KVM_MEM_GUEST_MEMFD;
+                        kvm_region.guest_memfd = file_offset.file().as_raw_fd() as _;
+                        kvm_region.guest_memfd_offset = file_offset.start();
+
+                        kvm_region
+                    }),
+            )
+            .zip(0u32..)
+            .map(|(mut kvm_region, slot)| {
+                kvm_region.slot = slot;
+                kvm_region
+            })
+            .try_for_each(|kvm_region| unsafe { self.fd.set_user_memory_region2(kvm_region) })
+            .map_err(VmError::SetUserMemoryRegion)?;
+
+        if let Some(private_mem) = private_mem {
+            for priv_region in private_mem.iter() {
+                self.fd
+                    .set_memory_attributes(kvm_memory_attributes {
+                        address: priv_region.start_addr().raw_value(),
+                        size: priv_region.size() as _,
+                        attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as _,
+                        ..Default::default()
+                    })
+                    .map_err(VmError::SetMemoryAttributes)?;
+            }
+        }
+
         #[cfg(target_arch = "x86_64")]
         self.fd
             .set_tss_address(u64_to_usize(crate::arch::x86_64::layout::KVM_TSS_ADDRESS))
@@ -105,39 +154,25 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) fn set_kvm_memory_regions(
-        &self,
-        guest_mem: &GuestMemoryMmap,
-    ) -> Result<(), VmError> {
-        guest_mem
-            .iter()
-            .zip(0u32..)
-            .try_for_each(|(region, slot)| {
-                let flags = if region.bitmap().is_some() {
-                    KVM_MEM_LOG_DIRTY_PAGES
-                } else {
-                    0
-                };
-
-                let memory_region = kvm_userspace_memory_region {
-                    slot,
-                    guest_phys_addr: region.start_addr().raw_value(),
-                    memory_size: region.len(),
-                    // It's safe to unwrap because the guest address is valid.
-                    userspace_addr: guest_mem.get_host_address(region.start_addr()).unwrap() as u64,
-                    flags,
-                };
-
-                // SAFETY: Safe because the fd is a valid KVM file descriptor.
-                unsafe { self.fd.set_user_memory_region(memory_region) }
-            })
-            .map_err(VmError::SetUserMemoryRegion)?;
-        Ok(())
-    }
-
     /// Gets a reference to the kvm file descriptor owned by this VM.
     pub fn fd(&self) -> &VmFd {
         &self.fd
+    }
+}
+
+fn kvmify(region: &GuestRegionMmap) -> kvm_userspace_memory_region2 {
+    let flags = if region.bitmap().is_some() {
+        KVM_MEM_LOG_DIRTY_PAGES
+    } else {
+        0
+    };
+
+    kvm_userspace_memory_region2 {
+        flags,
+        guest_phys_addr: region.start_addr().raw_value(),
+        memory_size: region.len(),
+        userspace_addr: region.as_ptr() as u64,
+        ..Default::default()
     }
 }
 
@@ -157,9 +192,9 @@ pub(crate) mod tests {
     // Auxiliary function being used throughout the tests.
     pub(crate) fn setup_vm_with_memory(mem_size: usize) -> (Kvm, Vm, GuestMemoryMmap) {
         let (kvm, vm) = setup_vm();
-        let gm = single_region_mem(mem_size);
-        vm.memory_init(&gm).unwrap();
-        (kvm, vm, gm)
+        let shared = single_region_mem(mem_size);
+        vm.memory_init(&shared, None).unwrap();
+        (kvm, vm, shared)
     }
 
     #[test]
@@ -173,26 +208,8 @@ pub(crate) mod tests {
     fn test_vm_memory_init() {
         let (_, vm) = setup_vm();
         // Create valid memory region and test that the initialization is successful.
-        let gm = single_region_mem(0x1000);
-        vm.memory_init(&gm).unwrap();
-    }
-
-    #[test]
-    fn test_set_kvm_memory_regions() {
-        let (_, vm) = setup_vm();
-
-        let gm = single_region_mem(0x1000);
-        let res = vm.set_kvm_memory_regions(&gm);
-        res.unwrap();
-
-        // Trying to set a memory region with a size that is not a multiple of GUEST_PAGE_SIZE
-        // will result in error.
-        let gm = single_region_mem(0x10);
-        let res = vm.set_kvm_memory_regions(&gm);
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "Cannot set the memory regions: Invalid argument (os error 22)"
-        );
+        let shared = single_region_mem(0x1000);
+        vm.memory_init(&shared, None).unwrap();
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
+use crate::arch::arch_memory_regions;
 use crate::cpu_config::templates::CustomCpuTemplate;
 use crate::device_manager::persist::SharedDeviceType;
 use crate::logger::info;
@@ -444,16 +445,41 @@ impl VmResources {
         Ok(())
     }
 
-    /// Allocates guest memory in a configuration most appropriate for these [`VmResources`].
-    ///
-    /// If vhost-user-blk devices are in use, allocates memfd-backed shared memory, otherwise
-    /// prefers anonymous memory for performance reasons.
-    pub fn allocate_shared_guest_memory(&self) -> Result<GuestMemoryMmap, MemoryError> {
-        let vhost_user_device_used = self
-            .block
+    /// Determines whether vhost-user devices exist. This needs to be taken into
+    /// account when allocating guest memory.
+    pub fn has_vhost_user_devices(&self) -> bool {
+        self.block
             .devices
             .iter()
-            .any(|b| b.lock().expect("Poisoned lock").is_vhost_user());
+            .any(|b| b.lock().expect("Poisoned lock").is_vhost_user())
+    }
+
+    /// The size of the "shared" area of guest memory. By "shared" we here mean "accessible
+    /// to the host kernel". In a [`MachineConfig::secret_free`] VM, this memory is used
+    /// exclusively for I/O DMA buffers.
+    pub fn shared_memory_size(&self) -> usize {
+        match self.machine_config.secret_free {
+            // Only kernel-shared memory in secret-free VM is the DMA area
+            // TODO: store this 64 as a constant somewhere, and deal with the case where we
+            // dont have 64 mib of memory.
+            true => 64,
+            false => self.machine_config.mem_size_mib,
+        }
+    }
+
+    /// The size of the "private" area of guest memory. By "private" we here mean "inaccessible
+    /// to the host kernel".
+    pub fn private_memory_size(&self) -> usize {
+        self.machine_config.mem_size_mib - self.shared_memory_size()
+    }
+
+    /// Allocates the shared guest memory, taking into account things like
+    /// secret freedom and vhost-user devices.
+    pub fn allocate_shared_memory(&self) -> Result<GuestMemoryMmap, MemoryError> {
+        let shmem_size = self.shared_memory_size();
+        // Shared memory is at the high end of guest memory, to avoid interfering with
+        // guest kernel loading.
+        let shmem_offset = self.private_memory_size();
 
         // Page faults are more expensive for shared memory mapping, including  memfd.
         // For this reason, we only back guest memory with a memfd
@@ -464,8 +490,8 @@ impl VmResources {
         // because that would require running a backend process. If in the future we converge to
         // a single way of backing guest memory for vhost-user and non-vhost-user cases,
         // that would not be worth the effort.
-        let regions = crate::arch::arch_memory_regions(0, self.machine_config.mem_size_mib << 20);
-        if vhost_user_device_used {
+        let regions = arch_memory_regions(shmem_offset, shmem_size << 20);
+        if self.has_vhost_user_devices() {
             GuestMemoryMmap::memfd_backed(
                 regions.as_ref(),
                 self.machine_config.track_dirty_pages,

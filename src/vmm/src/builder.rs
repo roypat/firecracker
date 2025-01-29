@@ -29,7 +29,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "x86_64")]
 use crate::acpi;
-use crate::arch::InitrdConfig;
+use crate::arch::{arch_memory_regions, InitrdConfig};
 #[cfg(target_arch = "aarch64")]
 use crate::construct_kvm_mpidrs;
 use crate::cpu_config::templates::{
@@ -68,7 +68,7 @@ use crate::vmm_config::boot_source::BootConfig;
 use crate::vmm_config::instance_info::InstanceInfo;
 use crate::vmm_config::machine_config::{MachineConfig, MachineConfigError};
 use crate::vstate::kvm::Kvm;
-use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryMmap};
+use crate::vstate::memory::{GuestAddress, GuestMemory, GuestMemoryExtension, GuestMemoryMmap};
 use crate::vstate::vcpu::{Vcpu, VcpuConfig, VcpuError};
 use crate::vstate::vm::Vm;
 use crate::{device_manager, EventManager, Vmm, VmmError};
@@ -149,9 +149,11 @@ impl std::convert::From<linux_loader::cmdline::Error> for StartMicrovmError {
 }
 
 #[cfg_attr(target_arch = "aarch64", allow(unused))]
+#[allow(clippy::too_many_arguments)]
 fn create_vmm_and_vcpus(
     instance_info: InstanceInfo,
     event_manager: &mut EventManager,
+    private_memory: Option<GuestMemoryMmap>,
     shared_memory: GuestMemoryMmap,
     uffd: Option<Uffd>,
     vcpu_count: u8,
@@ -160,10 +162,16 @@ fn create_vmm_and_vcpus(
 ) -> Result<(Vmm, Vec<Vcpu>), StartMicrovmError> {
     use self::StartMicrovmError::*;
 
-    kvm.check_memory_region_count(shared_memory.num_regions())
-        .map_err(VmmError::Kvm)
-        .map_err(StartMicrovmError::Internal)?;
-    vm.memory_init(&shared_memory)
+    kvm.check_memory_region_count(
+        shared_memory.num_regions()
+            + private_memory
+                .as_ref()
+                .map(GuestMemoryMmap::num_regions)
+                .unwrap_or(0),
+    )
+    .map_err(VmmError::Kvm)
+    .map_err(StartMicrovmError::Internal)?;
+    vm.memory_init(&shared_memory, private_memory.as_ref())
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
@@ -208,6 +216,7 @@ fn create_vmm_and_vcpus(
         shutdown_exit_code: None,
         kvm,
         vm,
+        private_memory,
         shared_memory,
         uffd,
         vcpus_handles: Vec::new(),
@@ -244,16 +253,6 @@ pub fn build_microvm_for_boot(
         .as_ref()
         .ok_or(MissingKernelConfig)?;
 
-    let shared_memory = vm_resources
-        .allocate_shared_guest_memory()
-        .map_err(StartMicrovmError::GuestMemory)?;
-
-    let entry_addr = load_kernel(boot_config, &shared_memory)?;
-    let initrd = load_initrd_from_config(boot_config, &shared_memory)?;
-    // Clone the command-line so that a failed boot doesn't pollute the original.
-    #[allow(unused_mut)]
-    let mut boot_cmdline = boot_config.cmdline.clone();
-
     let cpu_template = vm_resources
         .machine_config
         .cpu_template
@@ -268,9 +267,49 @@ pub fn build_microvm_for_boot(
         .map_err(VmmError::Vm)
         .map_err(StartMicrovmError::Internal)?;
 
+    let shared_memory = vm_resources.allocate_shared_memory().map_err(GuestMemory)?;
+
+    let private_memory_size = vm_resources.private_memory_size();
+
+    let private_memory = if private_memory_size > 0 {
+        let gfd = vm
+            .create_guest_memfd(private_memory_size)
+            .map_err(VmmError::Vm)
+            .map_err(Internal)?;
+
+        Some(
+            GuestMemoryMmap::create(
+                arch_memory_regions(0, private_memory_size << 20).into_iter(),
+                libc::MAP_SHARED,
+                Some(gfd),
+                false,
+            )
+            .map_err(StartMicrovmError::GuestMemory)?,
+        )
+    } else {
+        None
+    };
+
+    // FIXME: Figure out a nicer way to deal with this unwrap_or pattern
+    // it's mainly needed for borrowchk reasons, where if we banish it into a method, we cannot use
+    // it to borrow guest_memory while separately borrowing other vmm fields, which is sadly
+    // something that happens quite often (see configure_system_for_boot)
+    let entry_addr = load_kernel(
+        boot_config,
+        private_memory.as_ref().unwrap_or(&shared_memory),
+    )?;
+    let initrd = load_initrd_from_config(
+        boot_config,
+        private_memory.as_ref().unwrap_or(&shared_memory),
+    )?;
+    // Clone the command-line so that a failed boot doesn't pollute the original.
+    #[allow(unused_mut)]
+    let mut boot_cmdline = boot_config.cmdline.clone();
+
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
+        private_memory,
         shared_memory,
         None,
         vm_resources.machine_config.vcpu_count,
@@ -470,6 +509,7 @@ pub fn build_microvm_from_snapshot(
     let (mut vmm, mut vcpus) = create_vmm_and_vcpus(
         instance_info,
         event_manager,
+        None,
         guest_memory,
         uffd,
         vm_resources.machine_config.vcpu_count,
@@ -779,7 +819,11 @@ pub fn configure_system_for_boot(
         // Configure vCPUs with normalizing and setting the generated CPU configuration.
         for vcpu in vcpus.iter_mut() {
             vcpu.kvm_vcpu
-                .configure(vmm.guest_memory(), entry_addr, &vcpu_config)
+                .configure(
+                    vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
+                    entry_addr,
+                    &vcpu_config,
+                )
                 .map_err(VmmError::VcpuConfigure)
                 .map_err(Internal)?;
         }
@@ -790,16 +834,16 @@ pub fn configure_system_for_boot(
             .as_cstring()
             .map(|cmdline_cstring| cmdline_cstring.as_bytes_with_nul().len())?;
 
-        linux_loader::loader::load_cmdline::<crate::vstate::memory::GuestMemoryMmap>(
-            vmm.guest_memory(),
+        linux_loader::loader::load_cmdline(
+            vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
             GuestAddress(crate::arch::x86_64::layout::CMDLINE_START),
             &boot_cmdline,
         )
         .map_err(LoadCommandline)?;
         crate::arch::x86_64::configure_system(
-            &vmm.shared_memory,
+            vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
             &mut vmm.resource_allocator,
-            crate::vstate::memory::GuestAddress(crate::arch::x86_64::layout::CMDLINE_START),
+            GuestAddress(crate::arch::x86_64::layout::CMDLINE_START),
             cmdline_size,
             initrd,
             vcpu_config.vcpu_count,
@@ -809,7 +853,7 @@ pub fn configure_system_for_boot(
         // Create ACPI tables and write them in guest memory
         // For the time being we only support ACPI in x86_64
         acpi::create_acpi_tables(
-            &vmm.shared_memory,
+            vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
             &mut vmm.resource_allocator,
             &vmm.mmio_device_manager,
             &vmm.acpi_device_manager,
@@ -823,7 +867,7 @@ pub fn configure_system_for_boot(
         for vcpu in vcpus.iter_mut() {
             vcpu.kvm_vcpu
                 .configure(
-                    vmm.guest_memory(),
+                    vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
                     entry_addr,
                     &vcpu_config,
                     &optional_capabilities,
@@ -837,7 +881,7 @@ pub fn configure_system_for_boot(
             .collect();
         let cmdline = boot_cmdline.as_cstring()?;
         crate::arch::aarch64::configure_system(
-            &vmm.shared_memory,
+            vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory),
             cmdline,
             vcpu_mpidr,
             vmm.mmio_device_manager.get_device_info(),
@@ -1119,6 +1163,7 @@ pub(crate) mod tests {
             shutdown_exit_code: None,
             kvm,
             vm,
+            private_memory: None,
             shared_memory: guest_memory,
             uffd: None,
             vcpus_handles: Vec::new(),

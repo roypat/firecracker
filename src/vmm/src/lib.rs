@@ -312,8 +312,9 @@ pub struct Vmm {
     // Guest VM core resources.
     kvm: Kvm,
     vm: Vm,
-    // Save UFFD in order to keep it open in the Firecracker process, as well.
-    shared_memory: GuestMemoryMmap,// Save UFFD in order to keep it open in the Firecracker process, as well.
+    private_memory: Option<GuestMemoryMmap>,
+    shared_memory: GuestMemoryMmap,
+    // Save UFFD in order to keep it open in the Firecracker process, as well
     uffd: Option<Uffd>,
     vcpus_handles: Vec<VcpuHandle>,
     // Used by Vcpus and devices to initiate teardown; Vmm should never write here.
