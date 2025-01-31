@@ -20,7 +20,6 @@ pub use vm_memory::{
 use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
 use vmm_sys_util::errno;
 
-use crate::arch::arch_memory_regions;
 use crate::utils::{get_page_size, u64_to_usize};
 use crate::vmm_config::machine_config::HugePageConfig;
 use crate::DirtyBitmap;
@@ -70,15 +69,15 @@ where
 
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
     fn memfd_backed(
-        mem_size_mib: usize,
+        regions: &[(GuestAddress, usize)],
         track_dirty_pages: bool,
         huge_pages: HugePageConfig,
     ) -> Result<Self, MemoryError> {
-        let memfd_file = create_memfd(mem_size_mib, huge_pages.into())?.into_file();
-        let regions = arch_memory_regions(mem_size_mib << 20).into_iter();
+        let size = regions.iter().map(|(_, size)| size).sum();
+        let memfd_file = create_memfd(size, huge_pages.into())?.into_file();
 
         Self::create(
-            regions,
+            regions.iter().copied(),
             libc::MAP_SHARED | huge_pages.mmap_flags(),
             Some(memfd_file),
             track_dirty_pages,
@@ -103,11 +102,11 @@ where
     /// and a `state` containing mapping information.
     fn snapshot_file(
         file: File,
-        state: &GuestMemoryState,
+        regions: impl Iterator<Item = (GuestAddress, usize)>,
         track_dirty_pages: bool,
     ) -> Result<Self, MemoryError> {
         Self::create(
-            state.regions(),
+            regions,
             libc::MAP_PRIVATE,
             Some(file),
             track_dirty_pages,
@@ -324,10 +323,9 @@ impl GuestMemoryExtension for GuestMemoryMmap {
 }
 
 fn create_memfd(
-    size: usize,
+    mem_size: usize,
     hugetlb_size: Option<memfd::HugetlbSize>,
 ) -> Result<memfd::Memfd, MemoryError> {
-    let mem_size = size << 20;
     // Create a memfd.
     let opts = memfd::MemfdOptions::default()
         .hugetlb(hugetlb_size)
@@ -567,7 +565,7 @@ mod tests {
         guest_memory.dump(&mut memory_file).unwrap();
 
         let restored_guest_memory =
-            GuestMemoryMmap::snapshot_file(memory_file, &memory_state, false).unwrap();
+            GuestMemoryMmap::snapshot_file(memory_file, memory_state.regions(), false).unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; page_size * 2];
@@ -626,7 +624,7 @@ mod tests {
 
         // We can restore from this because this is the first dirty dump.
         let restored_guest_memory =
-            GuestMemoryMmap::snapshot_file(file, &memory_state, false).unwrap();
+            GuestMemoryMmap::snapshot_file(file, memory_state.regions(), false).unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; region_size];

@@ -464,14 +464,14 @@ impl VmResources {
         // because that would require running a backend process. If in the future we converge to
         // a single way of backing guest memory for vhost-user and non-vhost-user cases,
         // that would not be worth the effort.
+        let regions = crate::arch::arch_memory_regions(self.machine_config.mem_size_mib << 20);
         if vhost_user_device_used {
             GuestMemoryMmap::memfd_backed(
-                self.machine_config.mem_size_mib,
+                regions.as_ref(),
                 self.machine_config.track_dirty_pages,
                 self.machine_config.huge_pages,
             )
         } else {
-            let regions = crate::arch::arch_memory_regions(self.machine_config.mem_size_mib << 20);
             GuestMemoryMmap::anonymous(
                 regions.into_iter(),
                 self.machine_config.track_dirty_pages,
