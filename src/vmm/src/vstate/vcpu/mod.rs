@@ -932,21 +932,9 @@ pub(crate) mod tests {
     pub(crate) fn setup_vcpu(mem_size: usize) -> (Kvm, Vm, Vcpu, GuestMemoryMmap) {
         let (kvm, mut vm, gm) = setup_vm_with_memory(mem_size);
 
-        let exit_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let (mut vcpu, _) = vm.create_vcpus(1).unwrap();
 
-        #[cfg(target_arch = "aarch64")]
-        let vcpu = {
-            let mut vcpu = Vcpu::new(1, &vm, exit_evt).unwrap();
-            vcpu.kvm_vcpu.init(&[]).unwrap();
-            vm.setup_irqchip(1).unwrap();
-            vcpu
-        };
-        #[cfg(target_arch = "x86_64")]
-        let vcpu = {
-            vm.setup_irqchip().unwrap();
-            Vcpu::new(1, &vm, exit_evt).unwrap()
-        };
-        (kvm, vm, vcpu, gm)
+        (kvm, vm, vcpu.remove(0), gm)
     }
 
     fn load_good_kernel(vm_memory: &GuestMemoryMmap) -> GuestAddress {
