@@ -937,7 +937,7 @@ pub(crate) fn attach_boot_timer_device(
 }
 
 fn attach_vmgenid_device(vmm: &mut Vmm) -> Result<(), StartMicrovmError> {
-    let vmgenid = VmGenId::new(&vmm.shared_memory, &mut vmm.resource_allocator)
+    let vmgenid = VmGenId::new(&vmm.private_memory.as_ref().unwrap_or(&vmm.shared_memory), &mut vmm.resource_allocator)
         .map_err(StartMicrovmError::CreateVMGenID)?;
 
     vmm.acpi_device_manager

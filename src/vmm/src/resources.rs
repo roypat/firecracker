@@ -490,7 +490,7 @@ impl VmResources {
         // because that would require running a backend process. If in the future we converge to
         // a single way of backing guest memory for vhost-user and non-vhost-user cases,
         // that would not be worth the effort.
-        let regions = arch_memory_regions(shmem_offset, shmem_size << 20);
+        let regions = arch_memory_regions(shmem_offset << 20, shmem_size << 20);
         if self.has_vhost_user_devices() {
             GuestMemoryMmap::memfd_backed(
                 regions.as_ref(),

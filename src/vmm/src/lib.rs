@@ -449,7 +449,7 @@ impl Vmm {
 
     /// Returns a reference to the inner `GuestMemoryMmap` object.
     pub fn guest_memory(&self) -> &GuestMemoryMmap {
-        &self.shared_memory
+        self.private_memory.as_ref().unwrap_or(&self.shared_memory)
     }
 
     /// Sets RDA bit in serial console

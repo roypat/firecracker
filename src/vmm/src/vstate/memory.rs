@@ -200,6 +200,8 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     )
                 };
 
+                assert_ne!(ptr, libc::MAP_FAILED);
+
                 offset += size as u64;
 
                 // SAFETY: valid pointer

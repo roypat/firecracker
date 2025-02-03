@@ -8,10 +8,7 @@
 use std::fs::File;
 use std::os::fd::{AsRawFd, FromRawFd};
 
-use kvm_bindings::{
-    kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region2,
-    KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES,
-};
+use kvm_bindings::{kvm_create_guest_memfd, kvm_memory_attributes, kvm_userspace_memory_region2, KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES, KVM_X86_SW_PROTECTED_VM};
 use kvm_ioctls::VmFd;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -61,7 +58,7 @@ pub enum VmError {
 impl Vm {
     /// Create a new `Vm` struct.
     pub fn new(kvm: &Kvm) -> Result<Self, VmError> {
-        let fd = kvm.fd.create_vm().map_err(VmError::VmFd)?;
+        let fd = kvm.fd.create_vm_with_type(KVM_X86_SW_PROTECTED_VM as u64).map_err(VmError::VmFd)?;
 
         Vm::arch_create(kvm, fd).map_err(VmError::Arch)
     }
