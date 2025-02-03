@@ -7,6 +7,7 @@
 
 use std::fs::File;
 use std::io::SeekFrom;
+use std::os::fd::AsRawFd;
 
 use libc::c_int;
 use serde::{Deserialize, Serialize};
@@ -105,12 +106,7 @@ where
         regions: impl Iterator<Item = (GuestAddress, usize)>,
         track_dirty_pages: bool,
     ) -> Result<Self, MemoryError> {
-        Self::create(
-            regions,
-            libc::MAP_PRIVATE,
-            Some(file),
-            track_dirty_pages,
-        )
+        Self::create(regions, libc::MAP_PRIVATE, Some(file), track_dirty_pages)
     }
 
     /// Describes GuestMemoryMmap through a GuestMemoryState struct.
@@ -165,6 +161,7 @@ impl GuestMemoryState {
 }
 
 impl GuestMemoryExtension for GuestMemoryMmap {
+    #[allow(clippy::cast_possible_wrap)]
     fn create(
         regions: impl Iterator<Item = (GuestAddress, usize)>,
         mmap_flags: c_int,
@@ -177,24 +174,45 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                 let mut builder = MmapRegionBuilder::new_with_bitmap(
                     size,
                     track_dirty_pages.then(|| AtomicBitmap::with_len(size)),
-                )
-                .with_mmap_prot(libc::PROT_READ | libc::PROT_WRITE)
-                .with_mmap_flags(libc::MAP_NORESERVE | mmap_flags);
+                );
 
-                if let Some(ref file) = file {
+                let (fd, fd_offset) = if let Some(ref file) = file {
                     let file_offset =
                         FileOffset::new(file.try_clone().map_err(MemoryError::FileError)?, offset);
 
+                    let raw_fd = file_offset.file().as_raw_fd();
                     builder = builder.with_file_offset(file_offset);
-                }
+
+                    (raw_fd, offset)
+                } else {
+                    (-1, 0)
+                };
+
+                // SAFETY: valid values
+                let ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        size,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_NORESERVE | mmap_flags,
+                        fd,
+                        fd_offset as _,
+                    )
+                };
 
                 offset += size as u64;
 
-                GuestRegionMmap::new(
-                    builder.build().map_err(MemoryError::MmapRegionError)?,
-                    start,
-                )
-                .map_err(MemoryError::VmMemoryError)
+                // SAFETY: valid pointer
+                unsafe {
+                    GuestRegionMmap::new(
+                        builder
+                            .with_raw_mmap_pointer(ptr.cast())
+                            .build()
+                            .map_err(MemoryError::MmapRegionError)?,
+                        start,
+                    )
+                    .map_err(MemoryError::VmMemoryError)
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
