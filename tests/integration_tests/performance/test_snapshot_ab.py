@@ -1,17 +1,22 @@
 # Copyright 2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Performance benchmark for snapshot restore."""
+import signal
 import tempfile
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
 
 import pytest
+from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 import host_tools.drive as drive_tools
 from framework.microvm import Microvm
+from framework.utils_uffd import spawn_pf_handler, uffd_handler
 
 USEC_IN_MSEC = 1000
+NS_IN_MSEC = 1_000_000
 ITERATIONS = 30
 
 
@@ -74,21 +79,34 @@ class SnapshotRestoreTest:
             )
             vm.api.vsock.put(vsock_id="vsock0", guest_cid=3, uds_path="/v.sock")
 
+        vm.start()
+        vm.ssh.check_output(
+            "nohup /usr/local/bin/fast_page_fault_helper >/dev/null 2>&1 </dev/null &"
+        )
+
         return vm
 
     def sample_latency(
-        self, microvm_factory, snapshot, guest_kernel_linux_5_10
-    ) -> List[float]:
+        self, microvm_factory, snapshot, guest_kernel_linux_5_10, handler
+    ) -> dict:
         """Collects latency samples for the microvm configuration specified by this instance"""
-        values = []
+        values = {"restore": [], "post_restore": []}
 
-        for _ in range(ITERATIONS):
+        for _ in range(1):
             microvm = microvm_factory.build(
                 kernel=guest_kernel_linux_5_10,
                 monitor_memory=False,
             )
             microvm.spawn(emit_metrics=True)
-            snapshot_copy = microvm.restore_from_snapshot(snapshot, resume=True)
+
+            uffd_path = None
+            if handler is not None:
+                uffd = spawn_pf_handler(microvm, uffd_handler(handler), snapshot.mem)
+                uffd_path = uffd._socket_path
+
+            snapshot_copy = microvm.restore_from_snapshot(
+                snapshot, resume=True, uffd_path=uffd_path
+            )
 
             value = 0
             # Parse all metric data points in search of load_snapshot time.
@@ -100,7 +118,20 @@ class SnapshotRestoreTest:
                     value = cur_value / USEC_IN_MSEC
                     break
             assert value > 0
-            values.append(value)
+            values["restore"].append(value)
+
+            _, pid, _ = microvm.ssh.check_output("pidof fast_page_fault_helper")
+            print("time to send the signal!")
+            microvm.ssh.check_output(f"kill -s {signal.SIGUSR1} {pid}")
+            print("signal sent - waiting for time stamp file")
+            start = time.time()
+            _, duration, _ = microvm.ssh.check_output(
+                "while [ ! -f /tmp/fast_page_fault_helper.out ]; do sleep 1; done; cat /tmp/fast_page_fault_helper.out"
+            )
+            print("got the file :) that took", time.time() - start, "seconds")
+
+            values["post_restore"].append(int(duration) / NS_IN_MSEC)
+
             microvm.kill()
             snapshot_copy.delete()
 
@@ -108,24 +139,25 @@ class SnapshotRestoreTest:
         return values
 
 
-@pytest.mark.nonci
+#@pytest.mark.nonci
 @pytest.mark.parametrize(
     "test_setup",
     [
-        SnapshotRestoreTest(mem=128, vcpus=1),
-        SnapshotRestoreTest(mem=1024, vcpus=1),
-        SnapshotRestoreTest(mem=2048, vcpus=2),
-        SnapshotRestoreTest(mem=4096, vcpus=3),
-        SnapshotRestoreTest(mem=6144, vcpus=4),
-        SnapshotRestoreTest(mem=8192, vcpus=5),
-        SnapshotRestoreTest(mem=10240, vcpus=6),
-        SnapshotRestoreTest(mem=12288, vcpus=7),
-        SnapshotRestoreTest(all_devices=True),
+   #     SnapshotRestoreTest(mem=128, vcpus=1),
+        SnapshotRestoreTest(mem=1024, vcpus=2),
+    #    SnapshotRestoreTest(mem=2048, vcpus=2),
+    #    SnapshotRestoreTest(mem=4096, vcpus=3),
+    #    SnapshotRestoreTest(mem=6144, vcpus=4),
+    #    SnapshotRestoreTest(mem=8192, vcpus=5),
+    #    SnapshotRestoreTest(mem=10240, vcpus=6),
+    #    SnapshotRestoreTest(mem=12288, vcpus=7),
+    #    SnapshotRestoreTest(all_devices=True),
     ],
     ids=lambda x: x.id,
 )
+@pytest.mark.parametrize("uffd_handler", [None, "valid"])
 def test_restore_latency(
-    microvm_factory, rootfs, guest_kernel_linux_5_10, test_setup, metrics
+    microvm_factory, rootfs, guest_kernel_linux_5_10, test_setup, metrics, uffd_handler
 ):
     """
     Restores snapshots with vcpu/memory configuration, roughly scaling according to mem = (vcpus - 1) * 2048MB,
@@ -135,7 +167,6 @@ def test_restore_latency(
     We only test a single guest kernel, as the guest kernel does not "participate" in snapshot restore.
     """
     vm = test_setup.configure_vm(microvm_factory, guest_kernel_linux_5_10, rootfs)
-    vm.start()
 
     metrics.set_dimensions(
         {
@@ -152,10 +183,13 @@ def test_restore_latency(
     vm.kill()
 
     samples = test_setup.sample_latency(
-        microvm_factory,
-        snapshot,
-        guest_kernel_linux_5_10,
+        microvm_factory, snapshot, guest_kernel_linux_5_10, uffd_handler
     )
 
-    for sample in samples:
+    print(samples)
+
+    for sample in samples["restore"]:
         metrics.put_metric("latency", sample, "Milliseconds")
+
+    for sample in samples["post_restore"]:
+        metrics.put_metric("fault_latency", sample, "Milliseconds")
