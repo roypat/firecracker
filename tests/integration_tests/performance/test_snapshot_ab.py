@@ -1,7 +1,9 @@
 # Copyright 2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Performance benchmark for snapshot restore."""
+import signal
 import tempfile
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -9,8 +11,10 @@ import pytest
 
 import host_tools.drive as drive_tools
 from framework.microvm import Microvm
+from framework.utils_uffd import spawn_pf_handler, uffd_handler
 
 USEC_IN_MSEC = 1000
+NS_IN_MSEC = 1_000_000
 ITERATIONS = 30
 
 
@@ -90,7 +94,7 @@ class SnapshotRestoreTest:
     "test_setup",
     [
         SnapshotRestoreTest(mem=128, vcpus=1),
-        SnapshotRestoreTest(mem=1024, vcpus=1),
+        SnapshotRestoreTest(mem=1024, vcpus=2),
         SnapshotRestoreTest(mem=2048, vcpus=2),
         SnapshotRestoreTest(mem=4096, vcpus=3),
         SnapshotRestoreTest(mem=6144, vcpus=4),
@@ -130,3 +134,37 @@ def test_restore_latency(
                 break
         assert value > 0
         metrics.put_metric("latency", value, "Milliseconds")
+
+
+@pytest.mark.parametrize("uffd_handler", [None, "valid"])
+def test_post_restore_latency(
+    microvm_factory, rootfs, guest_kernel_linux_5_10, metrics, uffd_handler
+):
+    """Collects latency metric of post-restore memory accesses done inside the guest"""
+    test_setup = SnapshotRestoreTest(mem=1024, vcpus=2)
+    vm = test_setup.configure_vm(
+        microvm_factory, guest_kernel_linux_5_10, rootfs, metrics
+    )
+
+    vm.ssh.check_output(
+        "nohup /usr/local/bin/fast_page_fault_helper >/dev/null 2>&1 </dev/null &"
+    )
+
+    # Give helper time to initialize
+    time.sleep(5)
+
+    snapshot = vm.snapshot_full()
+    vm.kill()
+
+    for microvm in microvm_factory.build_n_from_snapshot(
+        snapshot, ITERATIONS, uffd_handler_name=uffd_handler
+    ):
+        _, pid, _ = microvm.ssh.check_output("pidof fast_page_fault_helper")
+
+        microvm.ssh.check_output(f"kill -s {signal.SIGUSR1} {pid}")
+
+        _, duration, _ = microvm.ssh.check_output(
+            "while [ ! -f /tmp/fast_page_fault_helper.out ]; do sleep 1; done; cat /tmp/fast_page_fault_helper.out"
+        )
+
+        metrics.put_metric("fault_latency", int(duration) / NS_IN_MSEC, "Milliseconds")
