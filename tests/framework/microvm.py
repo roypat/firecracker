@@ -1143,7 +1143,7 @@ class MicroVMFactory:
         """
         for _ in range(nr_vms):
             microvm = self.build()
-            microvm.spawn(emit_metrics=True)
+            microvm.spawn()
 
             uffd_path = None
             if uffd_handler_name is not None:
