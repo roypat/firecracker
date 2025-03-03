@@ -81,6 +81,7 @@ class SnapshotRestoreTest:
                 **vm.dimensions,
             }
         )
+        vm.start()
 
         return vm
 
@@ -133,7 +134,6 @@ def test_restore_latency(
     vm = test_setup.configure_vm(
         microvm_factory, guest_kernel_linux_5_10, rootfs, metrics
     )
-    vm.start()
 
     snapshot = vm.snapshot_full()
     vm.kill()
