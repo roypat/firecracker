@@ -90,7 +90,7 @@ where
     ) -> Result<Self, MemoryError> {
         Self::create(
             regions,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | huge_pages.mmap_flags(),
+            libc::MAP_SHARED | libc::MAP_ANONYMOUS | huge_pages.mmap_flags(),
             None,
             track_dirty_pages,
         )
