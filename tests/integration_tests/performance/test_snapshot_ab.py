@@ -10,6 +10,7 @@ from functools import lru_cache
 
 import pytest
 
+import host_tools.cargo_build
 import host_tools.drive as drive_tools
 from framework.microvm import HugePagesConfig, Microvm
 
@@ -153,8 +154,14 @@ def test_post_restore_latency(
     test_setup = SnapshotRestoreTest(mem=1024, vcpus=2, huge_pages=huge_pages)
     vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs, metrics)
 
+    host_tools.cargo_build.gcc_compile(
+        "../resources/overlay/usr/local/bin/fast_page_fault_helper.c",
+        "fast_page_fault_helper",
+    )
+    vm.ssh.scp_put("fast_page_fault_helper", "/tmp/fast_page_fault_helper")
+
     vm.ssh.check_output(
-        "nohup /usr/local/bin/fast_page_fault_helper >/dev/null 2>&1 </dev/null &"
+        "nohup /tmp/fast_page_fault_helper >/dev/null 2>&1 </dev/null &"
     )
 
     # Give helper time to initialize
