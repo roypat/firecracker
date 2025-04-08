@@ -6,7 +6,7 @@
 // found in the THIRD-PARTY file.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::{AsFd, AsRawFd};
 use std::ptr::null_mut;
@@ -82,6 +82,23 @@ impl<T: Read + AsFd> ReadVolatile for Bounce<T> {
             Ok(n)
         } else {
             self.0.as_fd().read_volatile(buf)
+        }
+    }
+}
+
+impl<T: Write + AsFd> WriteVolatile for Bounce<T> {
+    fn write_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<B>,
+    ) -> Result<usize, VolatileMemoryError> {
+        if self.1 {
+            let mut bbuf = vec![0; buf.len()];
+            buf.copy_to(bbuf.as_mut_slice());
+            self.0
+                .write(bbuf.as_slice())
+                .map_err(VolatileMemoryError::IOError)
+        } else {
+            self.0.as_fd().write_volatile(buf)
         }
     }
 }
