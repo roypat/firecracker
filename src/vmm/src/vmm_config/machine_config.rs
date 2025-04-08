@@ -293,8 +293,10 @@ impl MachineConfig {
 
         let mem_size_mib = update.mem_size_mib.unwrap_or(self.mem_size_mib);
         let page_config = update.huge_pages.unwrap_or(self.huge_pages);
-        let mem_config = update.mem_config.unwrap_or(self.mem_config);
+        let mut mem_config = update.mem_config.unwrap_or(self.mem_config);
         let track_dirty_pages = update.track_dirty_pages.unwrap_or(self.track_dirty_pages);
+
+        mem_config.secret_free = true;
 
         if mem_size_mib == 0 || !page_config.is_valid_mem_size(mem_size_mib) {
             return Err(MachineConfigError::InvalidMemorySize);
