@@ -381,12 +381,20 @@ def io_engine(request):
 # the network throughput test occasionally fail (both due to connection issues).
 # The block test passes even with the minimum of 1MiB. We pick 8 to have enough
 # buffer to the failing cases.
-@pytest.fixture(params=[None, 8] if platform.machine() == "aarch64" else [None])
+sf_test_cases = [None]
+if platform.machine() == "aarch64":
+    sf_test_cases.append((8, False))
+    if global_props.instance != "m6g.metal":
+        sf_test_cases.append((8, True))
+
+
+@pytest.fixture(params=sf_test_cases)
 def memory_config(request):
     """Differently configured swiotlb regions. Only supported on aarch64"""
     if request.param is None:
         return None
-    return {"initial_swiotlb_size": request.param}
+    swiotlb_size, secret_free = request.param
+    return {"initial_swiotlb_size": swiotlb_size, "secret_free": secret_free}
 
 
 @pytest.fixture
