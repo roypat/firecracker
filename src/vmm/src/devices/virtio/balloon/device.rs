@@ -25,7 +25,9 @@ use super::{
 };
 use crate::devices::virtio::balloon::BalloonError;
 use crate::devices::virtio::device::{IrqTrigger, IrqType};
-use crate::devices::virtio::generated::virtio_config::VIRTIO_F_VERSION_1;
+use crate::devices::virtio::generated::virtio_config::{
+    VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
+};
 use crate::logger::IncMetric;
 use crate::utils::u64_to_usize;
 use crate::vstate::memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap};
@@ -206,7 +208,7 @@ impl Balloon {
         stats_polling_interval_s: u16,
         restored_from_file: bool,
     ) -> Result<Balloon, BalloonError> {
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+        let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM);
 
         if deflate_on_oom {
             avail_features |= 1u64 << VIRTIO_BALLOON_F_DEFLATE_ON_OOM;

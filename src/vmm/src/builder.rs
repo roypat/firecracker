@@ -220,6 +220,7 @@ pub fn build_microvm_for_boot(
     // Clone the command-line so that a failed boot doesn't pollute the original.
     #[allow(unused_mut)]
     let mut boot_cmdline = boot_config.cmdline.clone();
+    boot_cmdline.insert("swiotlb", "force").unwrap();
 
     let cpu_template = vm_resources
         .machine_config

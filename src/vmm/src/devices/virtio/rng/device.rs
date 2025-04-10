@@ -13,7 +13,9 @@ use super::metrics::METRICS;
 use super::{RNG_NUM_QUEUES, RNG_QUEUE};
 use crate::devices::DeviceError;
 use crate::devices::virtio::device::{DeviceState, IrqTrigger, IrqType, VirtioDevice};
-use crate::devices::virtio::generated::virtio_config::VIRTIO_F_VERSION_1;
+use crate::devices::virtio::generated::virtio_config::{
+    VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
+};
 use crate::devices::virtio::iov_deque::IovDequeError;
 use crate::devices::virtio::iovec::IoVecBufferMut;
 use crate::devices::virtio::queue::{FIRECRACKER_MAX_QUEUE_SIZE, Queue};
@@ -72,7 +74,7 @@ impl Entropy {
         let irq_trigger = IrqTrigger::new()?;
 
         Ok(Self {
-            avail_features: 1 << VIRTIO_F_VERSION_1,
+            avail_features: (1 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM),
             acked_features: 0u64,
             activate_event,
             device_state: DeviceState::Inactive,
