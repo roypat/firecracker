@@ -169,7 +169,7 @@ def test_block_performance(
     """
     Execute block device emulation benchmarking scenarios.
     """
-    if secret_free and io_engine == "Async":
+    if io_engine == "Async":
         pytest.skip("userspace bounce buffers not supported with async block engine")
 
     vm = microvm_factory.build(guest_kernel_acpi, rootfs, monitor_memory=False)
@@ -223,6 +223,8 @@ def test_block_vhost_user_performance(
     """
     Execute block device emulation benchmarking scenarios.
     """
+
+    pytest.skip("incompatible with userspace bounce buffers")
 
     vm = microvm_factory.build(guest_kernel_acpi, rootfs, monitor_memory=False)
     vm.spawn(log_level="Info", emit_metrics=True)

@@ -639,7 +639,7 @@ fn attach_virtio_device<T: 'static + VirtioDevice + MutEventSubscriber + Debug>(
 ) -> Result<(), MmioError> {
     event_manager.add_subscriber(device.clone());
 
-    if vmm.vm.secret_free() {
+    if true {
         device.lock().unwrap().force_userspace_bounce_buffers();
     }
 
