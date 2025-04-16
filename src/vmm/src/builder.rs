@@ -732,7 +732,7 @@ fn attach_virtio_device<T: 'static + VirtioDevice + MutEventSubscriber + Debug>(
         // If swiotlb was requested via the API, enable it independently of whether
         // bouncing is actually required (e.g. of whether secret hiding is enabled)
         device.lock().unwrap().force_swiotlb();
-    } else if needs_bouncing {
+    } else if true {
         device.lock().unwrap().force_userspace_bounce_buffers();
     }
 

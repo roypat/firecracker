@@ -161,7 +161,7 @@ def test_block_performance(
     ):
         pytest.skip("swiotlb only supported on aarch64/6.1")
 
-    if memory_config is not None and io_engine == "Async":
+    if io_engine == "Async":
         pytest.skip("userspace bounce buffers not supported with async block engine")
 
     vm = microvm_factory.build(guest_kernel_acpi, rootfs, monitor_memory=False)
