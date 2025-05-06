@@ -173,7 +173,7 @@ def test_block_performance(
         pytest.skip("userspace bounce buffers not supported with async block engine")
 
     vm = microvm_factory.build(guest_kernel_acpi, rootfs, monitor_memory=False)
-    vm.spawn(log_level="Info", emit_metrics=True)
+    vm.spawn(emit_metrics=True)
     vm.basic_config(
         vcpu_count=vcpus, mem_size_mib=GUEST_MEM_MIB, secret_free=secret_free
     )

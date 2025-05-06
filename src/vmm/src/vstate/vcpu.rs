@@ -496,7 +496,11 @@ impl Vcpu {
             return Ok(VcpuEmulation::Interrupted);
         }
 
-        match self.kvm_vcpu.fd.run() {
+        let exit = self.kvm_vcpu.fd.run();
+
+        log::debug!("KVM Exit: {:?}", exit);
+
+        match exit {
             Err(ref err) if err.errno() == libc::EINTR => {
                 self.kvm_vcpu.fd.set_kvm_immediate_exit(0);
                 // Notify that this KVM_RUN was interrupted.
