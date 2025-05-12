@@ -1195,6 +1195,7 @@ class MicroVMFactory:
         last_snapshot = None
         for _ in range(nr_vms):
             microvm = self.build()
+            microvm.jailer.extra_args.update({"no-seccomp": None})
             microvm.spawn()
 
             snapshot_copy = microvm.restore_from_snapshot(
