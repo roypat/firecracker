@@ -143,36 +143,20 @@ def test_restore_latency(
 # latencies, but KVM latencies of setting up missing EPT entries.
 @pytest.mark.nonci
 @pytest.mark.parametrize("uffd_handler", [None, "on_demand", "fault_all"])
-@pytest.mark.parametrize("huge_pages", HugePagesConfig)
 def test_post_restore_latency(
     microvm_factory,
     rootfs,
     guest_kernel_linux_5_10,
     metrics,
     uffd_handler,
-    huge_pages,
     secret_free,
 ):
     """Collects latency metric of post-restore memory accesses done inside the guest"""
-    if huge_pages != HugePagesConfig.NONE and uffd_handler is None:
-        pytest.skip("huge page snapshots can only be restored using uffd")
-
-    if (
-        huge_pages != HugePagesConfig.NONE
-        and global_props.host_linux_version_tpl > (6, 1)
-        and global_props.cpu_architecture == "aarch64"
-    ):
-        pytest.skip(
-            "huge pages with secret hiding kernels on ARM are currently failing"
-        )
 
     if secret_free and uffd_handler is None:
         pytest.skip("secret free restoration only supported with UFFD")
 
-    if secret_free and huge_pages != HugePagesConfig.NONE:
-        pytest.skip("huge pages and guest_memfd not supported together")
-
-    test_setup = SnapshotRestoreTest(mem=1024, vcpus=2, huge_pages=huge_pages)
+    test_setup = SnapshotRestoreTest(mem=1024, vcpus=2)
     vm = test_setup.boot_vm(
         microvm_factory, guest_kernel_linux_5_10, rootfs, secret_free
     )
@@ -216,7 +200,6 @@ def test_post_restore_latency(
 
 
 @pytest.mark.nonci
-@pytest.mark.parametrize("huge_pages", HugePagesConfig)
 @pytest.mark.parametrize(
     ("vcpus", "mem"), [(1, 128), (1, 1024), (2, 2048), (3, 4096), (4, 6144)]
 )
@@ -225,25 +208,12 @@ def test_population_latency(
     rootfs,
     guest_kernel_linux_5_10,
     metrics,
-    huge_pages,
     vcpus,
     mem,
     secret_free,
 ):
     """Collects population latency metrics (e.g. how long it takes UFFD handler to fault in all memory)"""
-    if (
-        huge_pages != HugePagesConfig.NONE
-        and global_props.host_linux_version_tpl > (6, 1)
-        and global_props.cpu_architecture == "aarch64"
-    ):
-        pytest.skip(
-            "huge pages with secret hiding kernels on ARM are currently failing"
-        )
-
-    if secret_free and huge_pages != HugePagesConfig.NONE:
-        pytest.skip("huge pages and guest_memfd not supported together")
-
-    test_setup = SnapshotRestoreTest(mem=mem, vcpus=vcpus, huge_pages=huge_pages)
+    test_setup = SnapshotRestoreTest(mem=mem, vcpus=vcpus)
     vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs, secret_free)
 
     metrics.set_dimensions(
