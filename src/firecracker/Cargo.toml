@@ -16,7 +16,6 @@ bench = false
 bench = false
 
 [dependencies]
-bitvec = "1.0.1"
 displaydoc = "0.2.5"
 event-manager = "0.4.0"
 libc = "0.2.172"
@@ -33,6 +32,7 @@ vmm = { path = "../vmm" }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
 
 [dev-dependencies]
+bitvec = {version = "1.0.1", default-features = false, features = ["std"]}
 cargo_toml = "0.22.1"
 libc = "0.2.172"
 regex = { version = "1.11.1", default-features = false, features = ["std", "unicode-perl"] }
