@@ -76,6 +76,7 @@ def test_resume(uvm_nano, microvm_factory, resume_at_restore):
         assert restored_vm.state == "Paused"
         restored_vm.resume()
     assert restored_vm.state == "Running"
+    restored_vm.ssh.check_output("true")
 
 
 def test_snapshot_current_version(uvm_nano):

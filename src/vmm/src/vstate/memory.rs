@@ -5,6 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::SeekFrom;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
 use vmm_sys_util::errno;
 
 use crate::DirtyBitmap;
+use crate::arch::host_page_size;
 use crate::utils::{get_page_size, u64_to_usize};
 use crate::vmm_config::machine_config::HugePageConfig;
 
@@ -144,7 +146,7 @@ where
     fn mark_dirty(&self, addr: GuestAddress, len: usize);
 
     /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError>;
+    fn dump<T: WriteVolatile + std::io::Seek>(&self, writer: &mut T) -> Result<(), MemoryError>;
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.
     fn dump_dirty<T: WriteVolatile + std::io::Seek>(
@@ -212,10 +214,33 @@ impl GuestMemoryExtension for GuestMemoryMmap {
     }
 
     /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError> {
-        self.iter()
-            .try_for_each(|region| Ok(writer.write_all_volatile(&region.as_volatile_slice()?)?))
-            .map_err(MemoryError::WriteMemory)
+    fn dump<T: WriteVolatile + std::io::Seek>(&self, writer: &mut T) -> Result<(), MemoryError> {
+        let page_size = host_page_size();
+        let mut fake_kvm_bitmap = HashMap::new();
+        for (region, slot) in self.iter().zip(0..) {
+            let mut mincore_bitmap = vec![0u8; region.len() as usize / host_page_size()];
+            let mut bitmap = vec![0u64; region.len() as usize / page_size];
+
+            let r = unsafe {
+                libc::mincore(
+                    region.as_ptr().cast::<libc::c_void>(),
+                    region.len() as libc::size_t,
+                    mincore_bitmap.as_mut_ptr(),
+                )
+            };
+
+            if r != 0 {
+                panic!("{}", std::io::Error::last_os_error());
+            }
+
+            for (page_idx, b) in mincore_bitmap.iter().enumerate() {
+                bitmap[page_idx / 64] |= (*b as u64 & 0x1) << (page_idx as u64 % 64);
+            }
+
+            fake_kvm_bitmap.insert(slot, bitmap);
+        }
+
+        self.dump_dirty(writer, &fake_kvm_bitmap)
     }
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.
