@@ -5,6 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::SeekFrom;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use vm_memory::{Error as VmMemoryError, GuestMemoryError, WriteVolatile};
 use vmm_sys_util::errno;
 
 use crate::DirtyBitmap;
+use crate::arch::host_page_size;
 use crate::utils::{get_page_size, u64_to_usize};
 use crate::vmm_config::machine_config::HugePageConfig;
 
@@ -61,12 +63,10 @@ pub fn create(
     let file = file.map(Arc::new);
     regions
         .map(|(start, size)| {
-            let mut builder = MmapRegionBuilder::new_with_bitmap(
-                size,
-                track_dirty_pages.then(|| AtomicBitmap::with_len(size)),
-            )
-            .with_mmap_prot(libc::PROT_READ | libc::PROT_WRITE)
-            .with_mmap_flags(libc::MAP_NORESERVE | mmap_flags);
+            let mut builder =
+                MmapRegionBuilder::new_with_bitmap(size, Some(AtomicBitmap::with_len(size)))
+                    .with_mmap_prot(libc::PROT_READ | libc::PROT_WRITE)
+                    .with_mmap_flags(libc::MAP_NORESERVE | mmap_flags);
 
             if let Some(ref file) = file {
                 let file_offset = FileOffset::from_arc(Arc::clone(file), offset);
@@ -144,7 +144,7 @@ where
     fn mark_dirty(&self, addr: GuestAddress, len: usize);
 
     /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError>;
+    fn dump<T: WriteVolatile + std::io::Seek>(&self, writer: &mut T) -> Result<(), MemoryError>;
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.
     fn dump_dirty<T: WriteVolatile + std::io::Seek>(
@@ -212,10 +212,38 @@ impl GuestMemoryExtension for GuestMemoryMmap {
     }
 
     /// Dumps all contents of GuestMemoryMmap to a writer.
-    fn dump<T: WriteVolatile>(&self, writer: &mut T) -> Result<(), MemoryError> {
-        self.iter()
-            .try_for_each(|region| Ok(writer.write_all_volatile(&region.as_volatile_slice()?)?))
-            .map_err(MemoryError::WriteMemory)
+    fn dump<T: WriteVolatile + std::io::Seek>(&self, writer: &mut T) -> Result<(), MemoryError> {
+        let mut fake_kvm_bitmap = HashMap::new();
+        for (region, slot) in self.iter().zip(0..) {
+            let mut bitmap = vec![0u8; region.len() as usize / host_page_size()];
+
+            let r = unsafe {
+                libc::mincore(
+                    region.as_ptr().cast::<libc::c_void>(),
+                    region.len() as libc::size_t,
+                    bitmap.as_mut_ptr(),
+                )
+            };
+
+            if r != 0 {
+                panic!("{}", std::io::Error::last_os_error());
+            }
+
+            for (page_idx, b) in bitmap.iter().enumerate() {
+                if b & 0x1 != 0 {
+                    region
+                        .bitmap()
+                        .mark_dirty(page_idx * host_page_size(), host_page_size())
+                }
+            }
+
+            fake_kvm_bitmap.insert(
+                slot,
+                vec![0u64; region.len() as usize / host_page_size() / size_of::<u64>() / 8],
+            );
+        }
+
+        self.dump_dirty(writer, &fake_kvm_bitmap)
     }
 
     /// Dumps all pages of GuestMemoryMmap present in `dirty_bitmap` to a writer.
