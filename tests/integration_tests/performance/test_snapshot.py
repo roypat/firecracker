@@ -44,7 +44,7 @@ class SnapshotRestoreTest:
         """Computes a unique id for this test instance"""
         return "all_dev" if self.all_devices else f"{self.vcpus}vcpu_{self.mem}mb"
 
-    def boot_vm(self, microvm_factory, guest_kernel, rootfs) -> Microvm:
+    def boot_vm(self, microvm_factory, guest_kernel, rootfs, secret_free) -> Microvm:
         """Creates the initial snapshot that will be loaded repeatedly to sample latencies"""
         vm = microvm_factory.build(
             guest_kernel,
@@ -58,6 +58,7 @@ class SnapshotRestoreTest:
             mem_size_mib=self.mem,
             rootfs_io_engine="Sync",
             huge_pages=self.huge_pages,
+            secret_free=secret_free,
         )
 
         for _ in range(self.nets):
@@ -96,7 +97,11 @@ class SnapshotRestoreTest:
     ids=lambda x: x.id,
 )
 def test_restore_latency(
-    microvm_factory, rootfs, guest_kernel_linux_5_10, test_setup, metrics
+    microvm_factory,
+    rootfs,
+    guest_kernel_linux_5_10,
+    test_setup,
+    metrics,
 ):
     """
     Restores snapshots with vcpu/memory configuration, roughly scaling according to mem = (vcpus - 1) * 2048MB,
@@ -105,7 +110,7 @@ def test_restore_latency(
 
     We only test a single guest kernel, as the guest kernel does not "participate" in snapshot restore.
     """
-    vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs)
+    vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs, False)
 
     metrics.set_dimensions(
         {
@@ -148,13 +153,22 @@ def test_post_restore_latency(
     metrics,
     uffd_handler,
     huge_pages,
+    secret_free,
 ):
     """Collects latency metric of post-restore memory accesses done inside the guest"""
     if huge_pages != HugePagesConfig.NONE and uffd_handler is None:
         pytest.skip("huge page snapshots can only be restored using uffd")
 
+    if secret_free and uffd_handler is None:
+        pytest.skip("Restoring from a file is not compatible with Secret Freedom")
+
+    if secret_free and huge_pages != HugePagesConfig.NONE:
+        pytest.skip("Huge pages are not supported with Secret Freedom yet")
+
     test_setup = SnapshotRestoreTest(mem=1024, vcpus=2, huge_pages=huge_pages)
-    vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs)
+    vm = test_setup.boot_vm(
+        microvm_factory, guest_kernel_linux_5_10, rootfs, secret_free
+    )
 
     metrics.set_dimensions(
         {
@@ -206,10 +220,16 @@ def test_population_latency(
     huge_pages,
     vcpus,
     mem,
+    secret_free,
 ):
     """Collects population latency metrics (e.g. how long it takes UFFD handler to fault in all memory)"""
+    if secret_free and huge_pages != HugePagesConfig.NONE:
+        pytest.skip("Huge pages are not supported with Secret Freedom yet")
+
     test_setup = SnapshotRestoreTest(mem=mem, vcpus=vcpus, huge_pages=huge_pages)
-    vm = test_setup.boot_vm(microvm_factory, guest_kernel_linux_5_10, rootfs)
+    vm = test_setup.boot_vm(
+        microvm_factory, guest_kernel_linux_5_10, rootfs, secret_free
+    )
 
     metrics.set_dimensions(
         {
@@ -258,8 +278,12 @@ def test_snapshot_create_latency(
     rootfs,
     metrics,
     snapshot_type,
+    secret_free,
 ):
     """Measure the latency of creating a Full snapshot"""
+
+    if secret_free and snapshot_type == SnapshotType.DIFF:
+        pytest.skip("secret freedom and diff snapshots are mutually exclusive")
 
     vm = microvm_factory.build(guest_kernel_linux_5_10, rootfs, monitor_memory=False)
     vm.spawn()
@@ -267,6 +291,7 @@ def test_snapshot_create_latency(
         vcpu_count=2,
         mem_size_mib=512,
         track_dirty_pages=snapshot_type == SnapshotType.DIFF,
+        secret_free=secret_free,
     )
     vm.start()
     vm.pin_threads(0)
