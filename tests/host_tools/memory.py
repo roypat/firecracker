@@ -99,21 +99,25 @@ class MemoryMonitor(Thread):
         Checks if a region is a guest memory region based on
         x86_64 physical memory layout
         """
-        return size in (
-            # memory fits before the first gap
-            guest_mem_bytes,
-            # guest memory spans at least two regions & memory fits before the second gap
-            self.X86_32BIT_MEMORY_GAP_START,
-            # guest memory spans exactly two regions
-            guest_mem_bytes - self.X86_32BIT_MEMORY_GAP_START,
-            # guest memory fills the space between the two gaps
-            self.X86_64BIT_MEMORY_GAP_START
-            - self.X86_32BIT_MEMORY_GAP_START
-            - self.X86_32BIT_MEMORY_GAP_SIZE,
-            # guest memory spans 3 regions, this is what remains past the second gap
-            guest_mem_bytes
-            - self.X86_64BIT_MEMORY_GAP_START
-            + self.X86_32BIT_MEMORY_GAP_SIZE,
+        return (
+            size
+            in (
+                # memory fits before the first gap
+                guest_mem_bytes,
+                # guest memory spans at least two regions & memory fits before the second gap
+                self.X86_32BIT_MEMORY_GAP_START,
+                # guest memory spans exactly two regions
+                guest_mem_bytes - self.X86_32BIT_MEMORY_GAP_START,
+                # guest memory fills the space between the two gaps
+                self.X86_64BIT_MEMORY_GAP_START
+                - self.X86_32BIT_MEMORY_GAP_START
+                - self.X86_32BIT_MEMORY_GAP_SIZE,
+                # guest memory spans 3 regions, this is what remains past the second gap
+                guest_mem_bytes
+                - self.X86_64BIT_MEMORY_GAP_START
+                + self.X86_32BIT_MEMORY_GAP_SIZE,
+            )
+            or size > guest_mem_bytes
         )
 
     def is_guest_mem_arch64(self, size, guest_mem_bytes):
@@ -121,15 +125,19 @@ class MemoryMonitor(Thread):
         Checks if a region is a guest memory region based on
         ARM64 physical memory layout
         """
-        return size in (
-            # guest memory fits before the gap
-            guest_mem_bytes,
-            # guest memory fills the space before the gap
-            self.ARM64_64BIT_MEMORY_GAP_START - self.ARM64_MEMORY_START,
-            # guest memory spans 2 regions, this is what remains past the gap
-            guest_mem_bytes
-            - self.ARM64_64BIT_MEMORY_GAP_START
-            + self.ARM64_MEMORY_START,
+        return (
+            size
+            in (
+                # guest memory fits before the gap
+                guest_mem_bytes,
+                # guest memory fills the space before the gap
+                self.ARM64_64BIT_MEMORY_GAP_START - self.ARM64_MEMORY_START,
+                # guest memory spans 2 regions, this is what remains past the gap
+                guest_mem_bytes
+                - self.ARM64_64BIT_MEMORY_GAP_START
+                + self.ARM64_MEMORY_START,
+            )
+            or size > guest_mem_bytes
         )
 
     def is_guest_mem(self, size, guest_mem_bytes):
