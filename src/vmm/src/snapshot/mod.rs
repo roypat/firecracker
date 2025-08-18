@@ -26,10 +26,11 @@
 pub mod crc;
 mod persist;
 use std::fmt::Debug;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 use bincode::config;
 use bincode::config::{Configuration, Fixint, Limit, LittleEndian};
+use bincode::de::read::Reader;
 use bincode::error::{DecodeError, EncodeError};
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -86,8 +87,8 @@ struct SnapshotHdr {
 }
 
 impl SnapshotHdr {
-    fn load<R: Read>(reader: &mut R) -> Result<Self, SnapshotError> {
-        let hdr: SnapshotHdr = bincode::serde::decode_from_std_read(reader, BINCODE_CONFIG)?;
+    fn load<R: Reader>(reader: &mut R) -> Result<Self, SnapshotError> {
+        let hdr: SnapshotHdr = bincode::serde::decode_from_reader(reader, BINCODE_CONFIG)?;
 
         if hdr.magic != SNAPSHOT_MAGIC_ID {
             return Err(SnapshotError::InvalidMagic(hdr.magic));
@@ -138,22 +139,22 @@ impl<Data> Snapshot<Data> {
 }
 
 impl<Data: DeserializeOwned> Snapshot<Data> {
-    fn load_without_crc_check<R: Read>(reader: &mut R) -> Result<Self, SnapshotError> {
+    fn load_without_crc_check<R: Reader>(reader: &mut R) -> Result<Self, SnapshotError> {
         let header = SnapshotHdr::load(reader)?;
-        let data = bincode::serde::decode_from_std_read(reader, BINCODE_CONFIG)?;
+        let data = bincode::serde::decode_from_reader(reader, BINCODE_CONFIG)?;
         Ok(Self { header, data })
     }
 
     /// Loads a snapshot from the given [`Read`] instance, performing all validations
     /// (CRC, snapshot magic value, snapshot version).
     pub fn load<R: Read>(reader: &mut R) -> Result<Self, SnapshotError> {
-        let mut crc_reader = CRC64Reader::new(reader);
-        let snapshot = Self::load_without_crc_check(&mut crc_reader)?;
-        let computed_checksum = crc_reader.checksum();
-        let stored_checksum: u64 =
-            bincode::serde::decode_from_std_read(&mut crc_reader.reader, BINCODE_CONFIG)?;
-        if computed_checksum != stored_checksum {
-            return Err(SnapshotError::Crc64(computed_checksum));
+        let crc_reader = CRC64Reader::new(reader);
+        let mut buf_reader = BufReader::new(crc_reader);
+        let snapshot = Self::load_without_crc_check(&mut buf_reader)?;
+        let stored_checksum = bincode::serde::decode_from_reader(&mut buf_reader, BINCODE_CONFIG)?;
+        let computed_checksum = buf_reader.get_mut().checksum();
+        if computed_checksum != 0 {
+            return Err(SnapshotError::Crc64(stored_checksum));
         }
         Ok(snapshot)
     }
@@ -171,6 +172,8 @@ impl<Data: Serialize> Snapshot<Data> {
 
 #[cfg(test)]
 mod tests {
+    use bincode::de::read::SliceReader;
+
     use super::*;
 
     #[test]
@@ -224,7 +227,7 @@ mod tests {
         data[6] = 0x44;
         data[7] = 0x45;
         assert!(matches!(
-            SnapshotHdr::load(&mut data.as_slice()),
+            SnapshotHdr::load(&mut SliceReader::new(data.as_slice())),
             Err(SnapshotError::InvalidMagic(0x4544_4342_0403_0201u64))
         ));
     }

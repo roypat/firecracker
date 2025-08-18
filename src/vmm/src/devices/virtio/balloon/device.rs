@@ -80,7 +80,7 @@ pub struct BalloonConfig {
 }
 
 /// BalloonStats holds statistics returned from the stats_queue.
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BalloonStats {
     /// The target size of the balloon, in 4K pages.
